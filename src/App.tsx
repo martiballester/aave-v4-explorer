@@ -5,7 +5,7 @@ import { ParamsExplorer } from './ui/ParametersView/ParamsExplorer';
 type Tab = 'matrix' | 'params';
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('matrix');
+  const [tab, setTab] = useState<Tab>('params');
 
   return (
     <div className="lr-art" data-screen-label={tab}>
