@@ -28,9 +28,12 @@ export const HUB_ADDRESS_TO_ID: Record<string, HubId> = {
   '0x943827DCA022D0F354a8a8c332dA1e5Eb9f9F931': 'prime',
 };
 
-// Mainnet spoke address → editorial slug. The matrix and credit lines
-// reference these slugs; if a new spoke ships, it gets a derived slug
-// (`<hubId>-<slugify(name)>`) until pinned here.
+// Optional slug OVERRIDE for known mainnet spokes. Parent-hub assignment is
+// auto-derived from reserves (the hub holding most collateral = parent), so
+// new spokes don't need any editorial change — they just get a derived slug
+// like `core-newspoke` automatically. This override only exists to keep the
+// old slug shape for the existing 10 spokes (and to let you rename if you
+// don't like the auto-derived form).
 export const SPOKE_SLUG_BY_ADDRESS: Record<string, string> = {
   '0x94e7A5dCbE816e498b89aB752661904E2F56c485': 'core-main',
   '0xe1900480ac69f0B296841Cd01cC37546d92F35Cd': 'core-lido',
@@ -44,7 +47,8 @@ export const SPOKE_SLUG_BY_ADDRESS: Record<string, string> = {
   '0xba1B3D55D249692b669A164024A838309B7508AF': 'plus-ethena',
 };
 
-// Editorial spoke type. Drives the matrix tab's row grouping.
+// Editorial spoke type — drives the matrix tab's row grouping. Purely
+// aesthetic; new spokes default to 'General' until pinned here.
 export const SPOKE_TYPE_BY_SLUG: Record<string, string> = {
   'core-main': 'General',
   'core-lido': 'e-Mode',
@@ -57,6 +61,17 @@ export const SPOKE_TYPE_BY_SLUG: Record<string, string> = {
   'plus-correlated': 'e-Mode',
   'plus-ethena': 'General',
 };
+
+// Heuristic fallback: name-based inference for unknown spokes.
+export function inferSpokeTypeFromName(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('correlated') || n.includes('emode') || n.includes('e-mode')) return 'e-Mode';
+  if (n.includes('lido') || n.includes('etherfi') || n.includes('kelp') || n.includes('lombard'))
+    return 'e-Mode';
+  if (n.includes('gold') || n.includes('forex') || n.includes('rwa') || n.includes('isolation'))
+    return 'Specialty';
+  return 'General';
+}
 
 const AV = 'https://app.aave.com/icons/tokens/';
 
@@ -117,6 +132,9 @@ export function deriveSpokeSlug(address: string, hubId: HubId, name: string): st
   return `${hubId}-${slug}`;
 }
 
-export function spokeTypeFor(slug: string): string {
-  return SPOKE_TYPE_BY_SLUG[slug] ?? 'General';
+export function spokeTypeFor(slug: string, fallbackName?: string): string {
+  return (
+    SPOKE_TYPE_BY_SLUG[slug] ??
+    (fallbackName ? inferSpokeTypeFromName(fallbackName) : 'General')
+  );
 }

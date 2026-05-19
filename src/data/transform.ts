@@ -167,25 +167,51 @@ export function transform(raw: RawData): AaveParams {
     hub.summary.assetCount = assets.length;
   }
 
-  // ---------- 3. Spokes (without reserves yet) ----------
+  // ---------- 3. Spokes ----------
+  // Parent hub for each spoke is DATA-DERIVED, not editorial: count which hub
+  // holds the spoke's collateral reserves. Credit lines provide borrowable
+  // assets, not collateral, so the hub with the most `collateral: true`
+  // reserves is structurally the parent. Falls back to connectedHubs[0] if a
+  // spoke has zero collateral reserves yet (newly listed).
   const spokeBySlug = new Map<string, Spoke>();
   const slugByGqlSpokeId = new Map<string, string>();
   const slugByAddress = new Map<string, string>();
   for (const s of raw.spokes) {
-    // primary hub = first connectedHubs entry that maps to a known hub id.
-    const primary = s.connectedHubs
+    const connected = s.connectedHubs
       .map((c) => hubIdFromAddress(c.hub.address))
-      .find((id): id is HubId => id !== null);
-    if (!primary) continue;
-    const slug = deriveSpokeSlug(s.address, primary, s.name);
+      .filter((id): id is HubId => id !== null);
+    if (connected.length === 0) continue;
+
+    // Tally collateral reserves per hub
+    const reservesList = raw.reservesBySpokeId[s.id] ?? [];
+    const collateralByHub = new Map<HubId, number>();
+    for (const r of reservesList) {
+      if (!r.settings.collateral) continue;
+      const h = hubIdFromAddress(r.asset.hub.address);
+      if (!h) continue;
+      collateralByHub.set(h, (collateralByHub.get(h) ?? 0) + 1);
+    }
+
+    // Parent = hub with the most collateral reserves; tiebreaker = first in
+    // connectedHubs; zero-collateral fallback = connectedHubs[0]. This makes
+    // a brand-new multi-hub spoke get a correct credit-line classification
+    // the moment it's listed, with no editorial update needed.
+    let parentHub: HubId | undefined;
+    let maxCollateralCount = 0;
+    for (const h of connected) {
+      const count = collateralByHub.get(h) ?? 0;
+      if (count > maxCollateralCount) {
+        maxCollateralCount = count;
+        parentHub = h;
+      }
+    }
+    if (!parentHub) parentHub = connected[0];
+
+    const slug = deriveSpokeSlug(s.address, parentHub, s.name);
     slugByGqlSpokeId.set(s.id, slug);
     slugByAddress.set(s.address, slug);
 
-    // If the slug encodes a different hub (e.g. plus-ethena even though
-    // connectedHubs[0] is Core), honor the slug's hub. This keeps the
-    // editorial assignment stable across runs.
-    const hubFromSlug = slug.split('-')[0] as HubId;
-    const finalHub = HUB_EDITORIAL[hubFromSlug] ? hubFromSlug : primary;
+    const finalHub = parentHub;
 
     const lc = s.liquidationConfig;
     // AaveKit pre-decodes targetHealthFactor / healthFactorForMaxBonus to a
@@ -201,12 +227,10 @@ export function transform(raw: RawData): AaveParams {
     spokeBySlug.set(slug, {
       id: slug,
       name: s.name,
-      type: spokeTypeFor(slug),
+      type: spokeTypeFor(slug, s.name),
       address: s.address,
       hubId: finalHub,
-      connectedHubs: s.connectedHubs
-        .map((c) => hubIdFromAddress(c.hub.address))
-        .filter((id): id is HubId => id !== null),
+      connectedHubs: connected,
       summary: {
         totalSupplied: num(s.summary.totalSupplied.value),
         totalBorrowed: num(s.summary.totalBorrowed.value),
