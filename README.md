@@ -1,7 +1,7 @@
 # Aave V4 Explorer — LlamaRisk
 
 A static, point-in-time dashboard mapping the Aave V4 hub-and-spoke topology and parameter surface. Built from the design handoff at `../Visulizer/handoff/`. Deploys to GitHub Pages.
-https://github.com/martiballester/aave-v4-explorer
+https://martiballester.github.io/aave-v4-explorer/
 ## Status
 
 **Phase 1 (port) complete.** The prototype JSX has been ported to TypeScript React. Mock data still in place — the data layer reads from `src/data/fixtures/` rather than live AaveKit + RPC.
