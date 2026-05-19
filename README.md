@@ -8,7 +8,7 @@ A static, point-in-time dashboard mapping the Aave V4 hub-and-spoke topology and
 
 **Phase 2 (live data) pending.** `src/data/index.ts::fetchAaveParams` currently returns the fixture; replace its body with the GraphQL + RPC adapter per `../Visulizer/handoff/DATA-CONTRACT.md` and `QUERIES.md`. The hook signature must stay identical.
 
-**Phase 3 (deploy) ready.** `.github/workflows/deploy.yml` is in place. One-time GitHub setup: Settings → Pages → Source = "GitHub Actions"; Settings → Secrets → add `VITE_RPC_URL`.
+**Phase 3 (deploy) ready.** `.github/workflows/deploy.yml` is in place. One-time GitHub setup: Settings → Pages → Source = "GitHub Actions". **No secrets needed.** The dashboard uses public endpoints baked into the bundle (`https://eth.drpc.org` for RPC, `https://api.v4.aave.com/graphql` for AaveKit).
 
 ## Develop
 
@@ -60,3 +60,9 @@ async function fetchAaveParams(): Promise<AaveParams> {
 ```
 
 Reference: `../Visulizer/handoff/QUERIES.md` for the GraphQL operations and the viem multicall recipe. `../Visulizer/PARAMS.md` §D.1 maps every parameter to either a GraphQL path or an RPC selector.
+
+## RPC strategy — no private endpoints
+
+Phase 2 uses `https://eth.drpc.org` as the default Ethereum mainnet RPC (no API key, browser-CORS-friendly, free tier). Same pattern as [mo-anon/aave-params-dashboard](https://mo-anon.github.io/aave-params-dashboard/). The bundle is fully self-contained — anyone can clone, build, and deploy without configuring secrets. Optional override via `VITE_RPC_URL` in `.env.local` for local dev.
+
+Fallback public endpoints if drpc is rate-limited: `https://eth.llamarpc.com`, `https://eth.merkle.io`, `https://rpc.ankr.com/eth`, `https://cloudflare-eth.com`. Phase 2 should ship with a small rotation so a single endpoint outage doesn't blank the dashboard.
