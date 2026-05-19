@@ -63,6 +63,6 @@ Reference: `../Visulizer/handoff/QUERIES.md` for the GraphQL operations and the 
 
 ## RPC strategy — no private endpoints
 
-Phase 2 uses `https://eth.drpc.org` as the default Ethereum mainnet RPC (no API key, browser-CORS-friendly, free tier). Same pattern as [mo-anon/aave-params-dashboard](https://mo-anon.github.io/aave-params-dashboard/). The bundle is fully self-contained — anyone can clone, build, and deploy without configuring secrets. Optional override via `VITE_RPC_URL` in `.env.local` for local dev.
+Phase 2 uses `https://eth.drpc.org` as the default Ethereum mainnet RPC 
 
 Fallback public endpoints if drpc is rate-limited: `https://eth.llamarpc.com`, `https://eth.merkle.io`, `https://rpc.ankr.com/eth`, `https://cloudflare-eth.com`. Phase 2 should ship with a small rotation so a single endpoint outage doesn't blank the dashboard.
