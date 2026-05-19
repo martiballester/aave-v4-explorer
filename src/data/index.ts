@@ -17,6 +17,7 @@ import type {
   GqlHubSpokeConfig,
   GqlReserve,
   GqlSpoke,
+  HubSpokeConfigForPair,
 } from './graphql/types';
 import { transform } from './transform';
 import { ASSET_META } from './editorial';
@@ -32,10 +33,6 @@ const EMPTY_TOPOLOGY: Topology = {
 };
 
 // Run `fn` across `items` with a max of `limit` in flight at any time.
-// The public AaveKit endpoint appears to rate-limit aggressive fan-out (>6
-// parallel requests per IP stall indefinitely without erroring), so we cap
-// concurrency conservatively. With 250ms/request and limit=4, the full 13-call
-// round-2 batch completes in ~1s.
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -54,39 +51,66 @@ async function mapWithConcurrency<T, R>(
 }
 
 async function fetchAaveParams(): Promise<AaveParams> {
-  // Round 1: hubs + spokes + hubSpokeConfigs in parallel (only 3 queries).
-  // hubSpokeConfigs gives us cap aggregates per (hub, asset) for the hub-level
-  // addCap/drawCap totals; spokes feeds the per-spoke reserve queries.
-  const [hubsRes, spokesRes, hsConfigsRes] = await Promise.all([
+  // Round 1: hubs + spokes only (2 queries). hubSpokeConfigs moved to round 2
+  // because it now requires per-(hub, spoke) querying — needs spoke IDs first.
+  const [hubsRes, spokesRes] = await Promise.all([
     gql.request<{ hubs: GqlHub[] }>(QUERY_HUBS),
     gql.request<{ spokes: GqlSpoke[] }>(QUERY_SPOKES),
-    gql.request<{ hubSpokeConfigs: GqlHubSpokeConfig[] }>(QUERY_HUB_SPOKE_CONFIGS),
   ]);
 
   const hubs = hubsRes.hubs;
   const spokes = spokesRes.spokes;
-  const hubSpokeConfigs = hsConfigsRes.hubSpokeConfigs;
 
-  // Round 2: per-hub assets + per-spoke reserves with bounded concurrency.
-  const allItems = [
-    ...hubs.map((h) => ({ kind: 'hub' as const, id: h.id })),
-    ...spokes.map((s) => ({ kind: 'spoke' as const, id: s.id })),
+  // Round 2: per-hub assets + per-spoke reserves + per-(hub,spoke) configs.
+  // For configs, only query connected pairs (avoids N*M cartesian).
+  type Round2Item =
+    | { kind: 'ha'; hubId: string }
+    | { kind: 'res'; spokeId: string }
+    | { kind: 'hsc'; hubId: string; hubAddress: `0x${string}`; spokeId: string; spokeAddress: `0x${string}` };
+
+  const items: Round2Item[] = [
+    ...hubs.map((h): Round2Item => ({ kind: 'ha', hubId: h.id })),
+    ...spokes.map((s): Round2Item => ({ kind: 'res', spokeId: s.id })),
   ];
+
+  // Add one config query per connected (hub, spoke) pair
+  for (const s of spokes) {
+    for (const c of s.connectedHubs) {
+      items.push({
+        kind: 'hsc',
+        hubId: c.hub.id,
+        hubAddress: c.hub.address,
+        spokeId: s.id,
+        spokeAddress: s.address,
+      });
+    }
+  }
 
   const hubAssetsByHubId: Record<string, GqlHubAsset[]> = {};
   const reservesBySpokeId: Record<string, GqlReserve[]> = {};
+  const hubSpokeConfigsByPair: HubSpokeConfigForPair[] = [];
 
-  await mapWithConcurrency(allItems, 4, async (item) => {
-    if (item.kind === 'hub') {
+  await mapWithConcurrency(items, 4, async (item) => {
+    if (item.kind === 'ha') {
       const r = await gql.request<{ hubAssets: GqlHubAsset[] }>(QUERY_HUB_ASSETS, {
-        hubId: item.id,
+        hubId: item.hubId,
       });
-      hubAssetsByHubId[item.id] = r.hubAssets;
-    } else {
+      hubAssetsByHubId[item.hubId] = r.hubAssets;
+    } else if (item.kind === 'res') {
       const r = await gql.request<{ reserves: GqlReserve[] }>(QUERY_RESERVES, {
-        spokeId: item.id,
+        spokeId: item.spokeId,
       });
-      reservesBySpokeId[item.id] = r.reserves;
+      reservesBySpokeId[item.spokeId] = r.reserves;
+    } else {
+      const r = await gql.request<{ hubSpokeConfigs: GqlHubSpokeConfig[] }>(
+        QUERY_HUB_SPOKE_CONFIGS,
+        { hubId: item.hubId, spokeId: item.spokeId },
+      );
+      hubSpokeConfigsByPair.push({
+        hubAddress: item.hubAddress,
+        spokeAddress: item.spokeAddress,
+        entries: r.hubSpokeConfigs,
+      });
     }
   });
 
@@ -95,7 +119,7 @@ async function fetchAaveParams(): Promise<AaveParams> {
     hubAssetsByHubId,
     spokes,
     reservesBySpokeId,
-    hubSpokeConfigs,
+    hubSpokeConfigsByPair,
   });
 }
 

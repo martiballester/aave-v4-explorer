@@ -241,19 +241,11 @@ export const QUERY_RESERVES = /* GraphQL */ `
   }
 `;
 
+// Schema change (caught by smoke test): hubSpokeConfigs now requires
+// per-(hub, spoke) querying. No more chainIds bulk filter.
 export const QUERY_HUB_SPOKE_CONFIGS = /* GraphQL */ `
-  query HubSpokeConfigs {
-    hubSpokeConfigs(request: { query: { chainIds: [1] } }) {
-      hub {
-        id
-        name
-        address
-      }
-      spoke {
-        id
-        name
-        address
-      }
+  query HubSpokeConfigs($hubId: HubId!, $spokeId: SpokeId!) {
+    hubSpokeConfigs(request: { hubId: $hubId, spokeId: $spokeId }) {
       asset {
         onchainAssetId
         underlying {

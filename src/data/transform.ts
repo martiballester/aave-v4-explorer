@@ -17,9 +17,9 @@ import type {
 import type {
   GqlHub,
   GqlHubAsset,
-  GqlHubSpokeConfig,
   GqlReserve,
   GqlSpoke,
+  HubSpokeConfigForPair,
 } from './graphql/types';
 import { HUB_ADDRESS_TO_ID, HUB_EDITORIAL, deriveSpokeSlug, spokeTypeFor } from './editorial';
 
@@ -77,7 +77,7 @@ export interface RawData {
   hubAssetsByHubId: Record<string, GqlHubAsset[]>;
   spokes: GqlSpoke[];
   reservesBySpokeId: Record<string, GqlReserve[]>;
-  hubSpokeConfigs: GqlHubSpokeConfig[];
+  hubSpokeConfigsByPair: HubSpokeConfigForPair[];
 }
 
 export function transform(raw: RawData): AaveParams {
@@ -114,17 +114,20 @@ export function transform(raw: RawData): AaveParams {
   }
 
   // ---------- 2. Per-hub assets ----------
-  // Need cap aggregates from hubSpokeConfigs per (hub, asset symbol)
+  // Need cap aggregates from hubSpokeConfigs per (hub, asset symbol).
+  // Each pair entry brings the hubAddress + list of per-asset cap entries.
   const capAggByHubAsset = new Map<string, { addCap: number; drawCap: number }>();
-  for (const c of raw.hubSpokeConfigs) {
-    const hid = hubIdFromAddress(c.hub.address);
+  for (const pair of raw.hubSpokeConfigsByPair) {
+    const hid = hubIdFromAddress(pair.hubAddress);
     if (!hid) continue;
-    const sym = c.asset.underlying.info.symbol;
-    const key = `${hid}|${sym}`;
-    const cur = capAggByHubAsset.get(key) ?? { addCap: 0, drawCap: 0 };
-    cur.addCap += num(c.supplyCap.exchange.value);
-    cur.drawCap += num(c.borrowCap.exchange.value);
-    capAggByHubAsset.set(key, cur);
+    for (const c of pair.entries) {
+      const sym = c.asset.underlying.info.symbol;
+      const key = `${hid}|${sym}`;
+      const cur = capAggByHubAsset.get(key) ?? { addCap: 0, drawCap: 0 };
+      cur.addCap += num(c.supplyCap.exchange.value);
+      cur.drawCap += num(c.borrowCap.exchange.value);
+      capAggByHubAsset.set(key, cur);
+    }
   }
 
   for (const [hubId, hub] of hubsById) {
@@ -290,46 +293,48 @@ export function transform(raw: RawData): AaveParams {
     hub.summary.spokeCount = hubSpokes.length;
   }
 
-  // ---------- 6. Credit lines (derived from hubSpokeConfigs) ----------
+  // ---------- 6. Credit lines (derived from hubSpokeConfigsByPair) ----------
   // A "credit line" entry is a (hub, spoke, asset) where the spoke's editorial
   // parent hub differs from the hub providing the cap. Group these to form
   // CreditLine objects per (sourceHub, destinationSpoke).
   const linesByKey = new Map<string, CreditLine>();
-  for (const c of raw.hubSpokeConfigs) {
-    const sourceHub = hubIdFromAddress(c.hub.address);
-    const spokeSlug = slugByAddress.get(c.spoke.address);
+  for (const pair of raw.hubSpokeConfigsByPair) {
+    const sourceHub = hubIdFromAddress(pair.hubAddress);
+    const spokeSlug = slugByAddress.get(pair.spokeAddress);
     if (!sourceHub || !spokeSlug) continue;
     const spoke = spokeBySlug.get(spokeSlug);
     if (!spoke) continue;
     if (spoke.hubId === sourceHub) continue; // same-hub draws aren't credit lines
-    const addCap = num(c.supplyCap.exchange.value);
-    const drawCap = num(c.borrowCap.exchange.value);
-    if (addCap === 0 && drawCap === 0) continue;
-    const sym = c.asset.underlying.info.symbol;
-    const key = `${sourceHub}|${spoke.hubId}|${spokeSlug}`;
-    let line = linesByKey.get(key);
-    if (!line) {
-      line = {
-        from: sourceHub,
-        to: spoke.hubId,
-        toSpoke: spokeSlug,
-        assets: [],
-        index: linesByKey.size,
-        riskPremiumThreshold: pct(c.riskPremiumThreshold.normalized),
-        capByAsset: {},
+    for (const c of pair.entries) {
+      const addCap = num(c.supplyCap.exchange.value);
+      const drawCap = num(c.borrowCap.exchange.value);
+      if (addCap === 0 && drawCap === 0) continue;
+      const sym = c.asset.underlying.info.symbol;
+      const key = `${sourceHub}|${spoke.hubId}|${spokeSlug}`;
+      let line = linesByKey.get(key);
+      if (!line) {
+        line = {
+          from: sourceHub,
+          to: spoke.hubId,
+          toSpoke: spokeSlug,
+          assets: [],
+          index: linesByKey.size,
+          riskPremiumThreshold: pct(c.riskPremiumThreshold.normalized),
+          capByAsset: {},
+        };
+        linesByKey.set(key, line);
+      }
+      if (!line.assets.includes(sym)) line.assets.push(sym);
+      line.capByAsset[sym] = {
+        addCap,
+        drawCap,
+        // GraphQL doesn't expose per-(hub,spoke,asset) live supplied/borrowed
+        // independently of the spoke total. Use 0 here — the per-reserve view
+        // shows usage via the reserve table.
+        supplied: 0,
+        borrowed: 0,
       };
-      linesByKey.set(key, line);
     }
-    if (!line.assets.includes(sym)) line.assets.push(sym);
-    line.capByAsset[sym] = {
-      addCap,
-      drawCap,
-      // GraphQL doesn't expose per-(hub,spoke,asset) live supplied/borrowed
-      // independently of the spoke total. Use 0 here — the per-reserve view
-      // shows usage via the reserve table.
-      supplied: 0,
-      borrowed: 0,
-    };
   }
 
   // ---------- 7. Final API ----------

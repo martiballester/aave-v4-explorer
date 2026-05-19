@@ -1,0 +1,13 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: LlamaRisk
+    - generic [ref=e7]: Aave V4 Explorer
+    - generic [ref=e8]:
+      - generic [ref=e9]: Live · proposed market structure
+      - generic [ref=e11]: Ethereum · v4-RC1
+  - navigation [ref=e12]:
+    - button "Topology" [ref=e13] [cursor=pointer]
+    - button "Parameters" [ref=e14] [cursor=pointer]
+  - generic [ref=e16]:
+    - generic [ref=e17]: Topology
+    - paragraph [ref=e18]: Loading hub topology from AaveKit…

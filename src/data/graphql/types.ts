@@ -137,9 +137,9 @@ export interface GqlReserve {
   };
 }
 
+// Per-(hub, spoke) query returns an array of per-asset entries.
+// The (hub, spoke) context is implicit in the query, not echoed back.
 export interface GqlHubSpokeConfig {
-  hub: { id: string; name: string; address: `0x${string}` };
-  spoke: { id: string; name: string; address: `0x${string}` };
   asset: {
     onchainAssetId: string;
     underlying: { info: { symbol: string } };
@@ -149,4 +149,11 @@ export interface GqlHubSpokeConfig {
   active: boolean;
   halted: boolean;
   riskPremiumThreshold: GqlPct;
+}
+
+// Adapter shape: the (hub, spoke) coordinates we add back manually.
+export interface HubSpokeConfigForPair {
+  hubAddress: `0x${string}`;
+  spokeAddress: `0x${string}`;
+  entries: GqlHubSpokeConfig[];
 }
