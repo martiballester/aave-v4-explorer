@@ -15,7 +15,7 @@ type Selected =
   | { kind: 'reserve'; spokeId: string; symbol: string };
 
 export function ParamsExplorer() {
-  const { data, isLoading, error } = useAaveParams();
+  const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useAaveParams();
   const topology = useTopology();
 
   if (isLoading || !data) {
@@ -27,16 +27,28 @@ export function ParamsExplorer() {
     );
   }
 
-  return <ParamsExplorerInner data={data} hubNames={topology.HUB_NAMES} assetMeta={topology.assetMeta} />;
+  return (
+    <ParamsExplorerInner
+      data={data}
+      hubNames={topology.HUB_NAMES}
+      assetMeta={topology.assetMeta}
+      dataUpdatedAt={dataUpdatedAt}
+      isFetching={isFetching}
+      onRefresh={() => refetch()}
+    />
+  );
 }
 
 interface InnerProps {
   data: AaveParams;
   hubNames: Record<HubId, string>;
   assetMeta: ReturnType<typeof useTopology>['assetMeta'];
+  dataUpdatedAt: number;
+  isFetching: boolean;
+  onRefresh: () => void;
 }
 
-function ParamsExplorerInner({ data, hubNames, assetMeta }: InnerProps) {
+function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetching, onRefresh }: InnerProps) {
   const { hubs: P_HUBS, spokes: P_SPOKES, creditLines: P_CL, helpers: P_H } = data;
   const P_API = data;
   const P_HUB_NAMES = hubNames;
@@ -150,11 +162,26 @@ function ParamsExplorerInner({ data, hubNames, assetMeta }: InnerProps) {
           </div>
           <div className="pp-source">
             <span>AaveKit GraphQL</span>
-            <span className="pp-source-status">mock</span>
+            <span className={'pp-source-status ' + (isFetching ? 'fetching' : 'live')}>
+              {isFetching ? 'fetching' : 'live'}
+            </span>
           </div>
           <div className="pp-source">
-            <span>RPC fallback</span>
-            <span className="pp-source-status">mock</span>
+            <span>RPC reads</span>
+            <span className="pp-source-status">deferred</span>
+          </div>
+          <div className="pp-refresh-row">
+            <span>
+              Fetched{' '}
+              {new Date(dataUpdatedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
+            </span>
+            <button className="pp-refresh-btn" onClick={onRefresh} disabled={isFetching}>
+              {isFetching ? '…' : 'refresh'}
+            </button>
           </div>
         </div>
       </aside>

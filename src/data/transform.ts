@@ -228,7 +228,14 @@ export function transform(raw: RawData): AaveParams {
 
     const reserves: Reserve[] = list.map((r) => {
       const hubId = hubIdFromAddress(r.asset.hub.address);
-      const sym = r.asset.underlying.info.symbol;
+      const rawSym = r.asset.underlying.info.symbol;
+      // Multi-hub spokes (e.g. Bluechip on Prime+Core, Ethena Ecosystem on
+      // Plus+Core) can hold the same underlying asset twice — once from the
+      // parent hub, once as a credit line. Prefix credit-line reserves with
+      // 'c' so React keys stay unique AND the UI signals "this is a credit
+      // route" (matches the prototype's cUSDC/cUSDT convention).
+      const isCreditLine = hubId != null && hubId !== spoke.hubId;
+      const sym = isCreditLine ? `c${rawSym}` : rawSym;
       // ReserveStatus is an object { frozen, paused, active } — not an enum.
       const paused = !!r.status?.paused;
       const frozen = !!r.status?.frozen;
