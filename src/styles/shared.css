@@ -1,0 +1,41 @@
+/* Shared LlamaRisk styles for all three explorer directions */
+:root{
+  --lr-cyan:#0C2529; --lr-cyan-2:#143034; --lr-cyan-3:#1B3A3E; --lr-cyan-4:#244649;
+  --lr-dune:#F0EDE5;
+  --hub-core:#C9B68C; --hub-prime:#6FB7AE; --hub-plus:#D88E5A; --credit:#C76B58;
+  --emode:#B89BD9; --special:#D2A86A; --general:#8C969A;
+  --bg:var(--lr-cyan); --surface:var(--lr-cyan-2); --surface-2:var(--lr-cyan-3);
+  --line:rgba(240,237,229,0.10); --line-soft:rgba(240,237,229,0.06);
+  --fg:var(--lr-dune); --fg-soft:rgba(240,237,229,0.72); --fg-mute:rgba(240,237,229,0.48);
+  --font-display:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+.lr-art{background:var(--bg);color:var(--fg);font-family:var(--font-display);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;width:100%;height:100%;overflow:hidden}
+.lr-art a{color:inherit;text-decoration:none}
+.lr-art button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+.lr-eyebrow{font-family:var(--font-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--fg-mute);font-weight:500}
+.lr-pip{display:inline-flex;align-items:center;font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:2px;border:1px solid currentColor;background:transparent;white-space:nowrap;flex-shrink:0;line-height:1.2}
+.lr-pip[data-type="e-Mode"]{color:var(--emode)} .lr-pip[data-type="Specialty"]{color:var(--special)} .lr-pip[data-type="General"]{color:var(--general)}
+
+/* Header bar shared by all artboards */
+.art-head{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--bg)}
+.art-head img{height:18px;width:auto;display:block}
+.art-head .div{width:1px;height:18px;background:var(--line)}
+.art-head .tag{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-mute)}
+.art-head .meta{margin-left:auto;display:flex;align-items:center;gap:14px;font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-mute)}
+.art-head .dot{width:6px;height:6px;background:#6FB7AE;border-radius:50%;display:inline-block;margin-right:6px}
+
+/* Asset pill – default light-on-dark */
+.asset-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 3px;border-radius:999px;background:rgba(240,237,229,.04);border:1px solid var(--line);font-size:11.5px;color:var(--fg);font-family:var(--font-display)}
+.asset-pill .lbl{font-weight:500}
+.asset-pill .ty{font-family:var(--font-mono);font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-mute);margin-left:1px}
+.asset-icon-wrap{width:18px;height:18px;border-radius:50%;background:var(--bg);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
+.asset-icon-wrap.credit{background:transparent;border:1.5px dashed var(--credit)}
+.asset-icon-wrap.pt{position:relative;overflow:visible;border:1.5px solid var(--emode)}
+.asset-icon{width:16px;height:16px;border-radius:50%;display:block;object-fit:cover}
+/* light-pill on cream backgrounds */
+.cream .asset-pill{background:rgba(12,37,41,.04);border:1px solid rgba(12,37,41,.12);color:var(--bg)}
+.cream .asset-pill .ty{color:rgba(12,37,41,.45)}
+
+::selection{background:var(--lr-dune);color:var(--bg)}
