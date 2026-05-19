@@ -31,8 +31,30 @@ const EMPTY_TOPOLOGY: Topology = {
   assetMeta: ASSET_META,
 };
 
+// Run `fn` across `items` with a max of `limit` in flight at any time.
+// The public AaveKit endpoint appears to rate-limit aggressive fan-out (>6
+// parallel requests per IP stall indefinitely without erroring), so we cap
+// concurrency conservatively. With 250ms/request and limit=4, the full 13-call
+// round-2 batch completes in ~1s.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 async function fetchAaveParams(): Promise<AaveParams> {
-  // Round 1: hubs + spokes + hubSpokeConfigs in parallel.
+  // Round 1: hubs + spokes + hubSpokeConfigs in parallel (only 3 queries).
   // hubSpokeConfigs gives us cap aggregates per (hub, asset) for the hub-level
   // addCap/drawCap totals; spokes feeds the per-spoke reserve queries.
   const [hubsRes, spokesRes, hsConfigsRes] = await Promise.all([
@@ -45,29 +67,28 @@ async function fetchAaveParams(): Promise<AaveParams> {
   const spokes = spokesRes.spokes;
   const hubSpokeConfigs = hsConfigsRes.hubSpokeConfigs;
 
-  // Round 2: per-hub assets + per-spoke reserves, all in parallel.
-  const [hubAssetResults, reserveResults] = await Promise.all([
-    Promise.all(
-      hubs.map((h) =>
-        gql
-          .request<{ hubAssets: GqlHubAsset[] }>(QUERY_HUB_ASSETS, { hubId: h.id })
-          .then((r) => [h.id, r.hubAssets] as const),
-      ),
-    ),
-    Promise.all(
-      spokes.map((s) =>
-        gql
-          .request<{ reserves: GqlReserve[] }>(QUERY_RESERVES, { spokeId: s.id })
-          .then((r) => [s.id, r.reserves] as const),
-      ),
-    ),
-  ]);
+  // Round 2: per-hub assets + per-spoke reserves with bounded concurrency.
+  const allItems = [
+    ...hubs.map((h) => ({ kind: 'hub' as const, id: h.id })),
+    ...spokes.map((s) => ({ kind: 'spoke' as const, id: s.id })),
+  ];
 
   const hubAssetsByHubId: Record<string, GqlHubAsset[]> = {};
-  for (const [hubId, list] of hubAssetResults) hubAssetsByHubId[hubId] = list;
-
   const reservesBySpokeId: Record<string, GqlReserve[]> = {};
-  for (const [spokeId, list] of reserveResults) reservesBySpokeId[spokeId] = list;
+
+  await mapWithConcurrency(allItems, 4, async (item) => {
+    if (item.kind === 'hub') {
+      const r = await gql.request<{ hubAssets: GqlHubAsset[] }>(QUERY_HUB_ASSETS, {
+        hubId: item.id,
+      });
+      hubAssetsByHubId[item.id] = r.hubAssets;
+    } else {
+      const r = await gql.request<{ reserves: GqlReserve[] }>(QUERY_RESERVES, {
+        spokeId: item.id,
+      });
+      reservesBySpokeId[item.id] = r.reserves;
+    }
+  });
 
   return transform({
     hubs,
