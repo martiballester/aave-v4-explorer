@@ -50,6 +50,11 @@ interface InnerProps {
 
 function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetching, onRefresh }: InnerProps) {
   const { hubs: P_HUBS, spokes: P_SPOKES, creditLines: P_CL, helpers: P_H } = data;
+  // RPC layer is live if at least one spoke has a non-zero ORACLE() address —
+  // multicall succeeded. If all are zero, the fallback chain failed and we
+  // show "fallback" instead.
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const rpcLive = data.spokes.some((s) => s.summary.oracle && s.summary.oracle !== ZERO);
   const P_API = data;
   const P_HUB_NAMES = hubNames;
   const P_META = assetMeta;
@@ -168,7 +173,9 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
           </div>
           <div className="pp-source">
             <span>RPC reads</span>
-            <span className="pp-source-status">deferred</span>
+            <span className={'pp-source-status ' + (rpcLive ? 'live' : '')}>
+              {rpcLive ? 'live' : 'fallback'}
+            </span>
           </div>
           <div className="pp-refresh-row">
             <span>
