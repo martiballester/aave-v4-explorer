@@ -364,14 +364,20 @@ export function transform(raw: RawData): AaveParams {
         linesByKey.set(key, line);
       }
       if (!line.assets.includes(sym)) line.assets.push(sym);
+      // Find the matching credit-line reserve on the destination spoke. The
+      // reserve carries the live `supplied`/`borrowed` (we c-prefix credit
+      // reserves in step 4, so the lookup is `c${sym}` AND hubAddress matches
+      // the source). This was previously hardcoded to 0 — that was wrong.
+      const matchingReserve = spoke.reserves.find(
+        (r) =>
+          (r.symbol === `c${sym}` || r.symbol === sym) &&
+          r.hubAddress.toLowerCase() === pair.hubAddress.toLowerCase(),
+      );
       line.capByAsset[sym] = {
         addCap,
         drawCap,
-        // GraphQL doesn't expose per-(hub,spoke,asset) live supplied/borrowed
-        // independently of the spoke total. Use 0 here — the per-reserve view
-        // shows usage via the reserve table.
-        supplied: 0,
-        borrowed: 0,
+        supplied: matchingReserve?.suppliedAmount ?? 0,
+        borrowed: matchingReserve?.borrowedAmount ?? 0,
       };
     }
   }

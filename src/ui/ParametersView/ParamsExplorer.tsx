@@ -632,11 +632,25 @@ function CreditRow({ cl, direction, hubNames, meta, onSelect }: CreditRowProps) 
         <div className="pp-cl-detail">
           <div className="pp-cl-meta">
             <KV k="Premium share threshold">
-              <b className="pp-mono">{fmtPct(cl.riskPremiumThreshold, 0)}</b>
+              <b className="pp-mono">
+                {fmtPct(cl.riskPremiumThreshold, 0)}
+                {cl.riskPremiumThreshold === 0 && (
+                  <span className="pp-mute" style={{ marginLeft: 6, fontSize: 10 }}>
+                    (inactive)
+                  </span>
+                )}
+              </b>
             </KV>
             <span className="pp-cl-meta-hint">
-              Max ratio of premium shares to drawn shares for this credit line. Above this, new draws on the
-              credit line revert.
+              Max ratio of premium shares to drawn shares for this credit line. Above this, new draws
+              revert.
+              {cl.riskPremiumThreshold === 0 && (
+                <>
+                  {' '}
+                  Currently 0 across mainnet — V4&apos;s risk-premium mechanism isn&apos;t being charged
+                  yet (collateralRisk = 0 BPS on all reserves).
+                </>
+              )}
             </span>
           </div>
           <div className="pp-cl-cap-table">
