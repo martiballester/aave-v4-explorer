@@ -21,16 +21,7 @@ export function Matrix() {
   const [selectedSpokes, setSelectedSpokes] = useState<string[]>([]);
   const [activeCredit, setActiveCredit] = useState<number | null>(null);
 
-  // Loading state — useTopology returns an empty hubs list while the live
-  // AaveKit fetch is in flight.
-  if (hubsM.length === 0) {
-    return (
-      <div style={{ padding: 24, color: 'var(--fg-mute)' }}>
-        <div className="lr-eyebrow">Topology</div>
-        <p style={{ marginTop: 8 }}>Loading hub topology from AaveKit…</p>
-      </div>
-    );
-  }
+  const isLoading = hubsM.length === 0;
 
   const allSpokes = useMemo<SpokeWithHub[]>(
     () =>
@@ -158,6 +149,17 @@ export function Matrix() {
     if (isHover) return 'col-hov';
     return '';
   };
+
+  // Render loading state AFTER all hooks have been called — Rules of Hooks
+  // require a stable call order across renders.
+  if (isLoading) {
+    return (
+      <div style={{ padding: 24, color: 'var(--fg-mute)' }}>
+        <div className="lr-eyebrow">Topology</div>
+        <p style={{ marginTop: 8 }}>Loading hub topology from AaveKit…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-root">
