@@ -9,12 +9,12 @@ import type {
   Spoke,
 } from '../../data/types';
 
-type Selected =
+export type Selected =
   | { kind: 'hub'; id: HubId }
   | { kind: 'spoke'; id: string }
   | { kind: 'reserve'; spokeId: string; symbol: string };
 
-export function ParamsExplorer() {
+export function ParamsExplorer({ initialSelection }: { initialSelection?: Selected } = {}) {
   const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useAaveParams();
   const topology = useTopology();
 
@@ -35,6 +35,7 @@ export function ParamsExplorer() {
       dataUpdatedAt={dataUpdatedAt}
       isFetching={isFetching}
       onRefresh={() => refetch()}
+      initialSelection={initialSelection}
     />
   );
 }
@@ -46,9 +47,10 @@ interface InnerProps {
   dataUpdatedAt: number;
   isFetching: boolean;
   onRefresh: () => void;
+  initialSelection?: Selected;
 }
 
-function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetching, onRefresh }: InnerProps) {
+function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetching, onRefresh, initialSelection }: InnerProps) {
   const { hubs: P_HUBS, spokes: P_SPOKES, creditLines: P_CL, helpers: P_H } = data;
   // RPC layer is live if at least one spoke has a non-zero ORACLE() address —
   // multicall succeeded. If all are zero, the fallback chain failed and we
@@ -59,7 +61,7 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
   const P_HUB_NAMES = hubNames;
   const P_META = assetMeta;
 
-  const [selected, setSelected] = useState<Selected>({ kind: 'hub', id: 'core' });
+  const [selected, setSelected] = useState<Selected>(initialSelection ?? { kind: 'hub', id: 'core' });
   const [openHubs, setOpenHubs] = useState<Record<string, boolean>>({ core: true, prime: true, plus: true });
   const [openSpokes, setOpenSpokes] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState('');
