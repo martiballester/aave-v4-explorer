@@ -21,6 +21,7 @@ import type {
   GqlSpoke,
   HubSpokeConfigForPair,
 } from './graphql/types';
+import type { RpcReads } from './rpc/reads';
 import { HUB_ADDRESS_TO_ID, HUB_EDITORIAL, deriveSpokeSlug, spokeTypeFor } from './editorial';
 
 const num = (s: string | null | undefined): number => {
@@ -78,6 +79,7 @@ export interface RawData {
   spokes: GqlSpoke[];
   reservesBySpokeId: Record<string, GqlReserve[]>;
   hubSpokeConfigsByPair: HubSpokeConfigForPair[];
+  rpc: RpcReads;
 }
 
 export function transform(raw: RawData): AaveParams {
@@ -211,8 +213,10 @@ export function transform(raw: RawData): AaveParams {
         utilizationRate: 0,
         uniqueAssets: s.summary.uniqueAssets,
         connectedHubs: s.summary.connectedHubs,
-        oracle: ZERO_ADDR(), // RPC-only; deferred to Phase 2.1
-        maxUserReservesLimit: 0,
+        // Phase 2.1: populated from RPC reads below.
+        oracle: raw.rpc.spokeImmutables.get(s.address)?.oracle ?? ZERO_ADDR(),
+        maxUserReservesLimit:
+          raw.rpc.spokeImmutables.get(s.address)?.maxUserReservesLimit ?? 0,
       },
       liquidationConfig: liq,
       reserves: [],
@@ -265,11 +269,15 @@ export function transform(raw: RawData): AaveParams {
         supplyApy: pct(r.summary.supplyApy.normalized),
         borrowApy: pct(r.summary.borrowApy.normalized),
         oracle: {
-          source: ZERO_ADDR(), // RPC-only; deferred to Phase 2.1
+          // Phase 2.1: per-reserve price feed from AaveOracle.getReserveSource
+          source:
+            raw.rpc.reserveSources.get(`${spoke.address}|${Number(r.onChainId)}`) ??
+            ZERO_ADDR(),
           description: `${sym} / USD`,
-          price: supplied > 0 && Number(r.summary.supplied.amount.value) > 0
-            ? supplied / Number(r.summary.supplied.amount.value)
-            : 1,
+          price:
+            supplied > 0 && Number(r.summary.supplied.amount.value) > 0
+              ? supplied / Number(r.summary.supplied.amount.value)
+              : 1,
           decimals: 8,
         },
       };

@@ -20,6 +20,7 @@ import type {
   HubSpokeConfigForPair,
 } from './graphql/types';
 import { transform } from './transform';
+import { fetchRpc } from './rpc/reads';
 import { ASSET_META } from './editorial';
 import type { AaveParams, Topology } from './types';
 
@@ -114,12 +115,30 @@ async function fetchAaveParams(): Promise<AaveParams> {
     }
   });
 
+  // Round 3 (phase 2.1): RPC reads for fields AaveKit doesn't expose —
+  // per-spoke ORACLE() + MAX_USER_RESERVES_LIMIT, per-reserve oracle source
+  // address. One viem multicall against drpc public RPC (no key). Falls back
+  // to placeholders on any error so the page still renders.
+  const reserveRefs = Object.entries(reservesBySpokeId).flatMap(([spokeId, reserves]) => {
+    const spoke = spokes.find((s) => s.id === spokeId);
+    if (!spoke) return [];
+    return reserves.map((r) => ({
+      spokeAddress: spoke.address,
+      reserveId: Number(r.onChainId),
+    }));
+  });
+  const rpc = await fetchRpc(
+    spokes.map((s) => s.address),
+    reserveRefs,
+  );
+
   return transform({
     hubs,
     hubAssetsByHubId,
     spokes,
     reservesBySpokeId,
     hubSpokeConfigsByPair,
+    rpc,
   });
 }
 
