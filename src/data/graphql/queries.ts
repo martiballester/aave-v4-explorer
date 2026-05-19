@@ -155,7 +155,11 @@ export const QUERY_RESERVES = /* GraphQL */ `
     reserves(request: { query: { spokeId: $spokeId } }) {
       id
       onChainId
-      status
+      status {
+        frozen
+        paused
+        active
+      }
       canBorrow
       canSupply
       canUseAsCollateral

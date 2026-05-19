@@ -95,10 +95,16 @@ export interface GqlSpoke {
   } | null;
 }
 
+export interface GqlReserveStatus {
+  frozen: boolean;
+  paused: boolean;
+  active: boolean;
+}
+
 export interface GqlReserve {
   id: string;
   onChainId: string;
-  status: string;
+  status: GqlReserveStatus;
   canBorrow: boolean;
   canSupply: boolean;
   canUseAsCollateral: boolean;

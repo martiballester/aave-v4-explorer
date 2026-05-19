@@ -183,10 +183,12 @@ export function transform(raw: RawData): AaveParams {
     const finalHub = HUB_EDITORIAL[hubFromSlug] ? hubFromSlug : primary;
 
     const lc = s.liquidationConfig;
+    // AaveKit pre-decodes targetHealthFactor / healthFactorForMaxBonus to a
+    // decimal string (e.g. "1.174000000000000000"). No /1e18 needed here.
     const liq = lc
       ? {
-          targetHF: num(lc.targetHealthFactor) / 1e18,
-          hfForMaxBonus: num(lc.healthFactorForMaxBonus) / 1e18,
+          targetHF: num(lc.targetHealthFactor),
+          hfForMaxBonus: num(lc.healthFactorForMaxBonus),
           liqBonusFactor: pct(lc.liquidationBonusFactor.normalized),
         }
       : { targetHF: 1.05, hfForMaxBonus: 0.93, liqBonusFactor: 0.3 };
@@ -224,10 +226,9 @@ export function transform(raw: RawData): AaveParams {
     const reserves: Reserve[] = list.map((r) => {
       const hubId = hubIdFromAddress(r.asset.hub.address);
       const sym = r.asset.underlying.info.symbol;
-      // status comes back as a string like "ACTIVE" / "PAUSED" / "FROZEN".
-      const status = (r.status || '').toUpperCase();
-      const paused = status === 'PAUSED';
-      const frozen = status === 'FROZEN';
+      // ReserveStatus is an object { frozen, paused, active } — not an enum.
+      const paused = !!r.status?.paused;
+      const frozen = !!r.status?.frozen;
       const supplied = num(r.summary.supplied.exchange.value);
       const borrowed = num(r.summary.borrowed.exchange.value);
       return {
