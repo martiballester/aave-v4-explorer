@@ -279,7 +279,20 @@ function ReserveFlags({ reserve: r, compact }: { reserve: Reserve; compact?: boo
   if (r.frozen) flags.push({ k: 'F', t: 'frozen', cls: 'warn' });
   if (!r.collateral) flags.push({ k: 'B', t: 'borrow only', cls: 'mute' });
   if (!r.borrowable) flags.push({ k: 'C', t: 'collateral only', cls: 'mute' });
-  if (flags.length === 0) return null;
+  // Dual-purpose reserves (both collateral AND borrowable, healthy) — no
+  // restriction flags apply. Render a faint "both" pip so the column looks
+  // consistent with neighboring rows instead of empty (which reads as
+  // missing data).
+  if (flags.length === 0) {
+    if (compact) return null;
+    return (
+      <span className="pp-flags">
+        <span className="pp-flag pp-flag-mute" title="collateral & borrowable">
+          ↔
+        </span>
+      </span>
+    );
+  }
   return (
     <span className="pp-flags">
       {flags.slice(0, compact ? 2 : 5).map((f) => (
