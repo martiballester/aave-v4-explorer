@@ -204,7 +204,7 @@
 .pp-cl-cap-asset{display:flex;align-items:center;gap:8px}
 
 /* ===== App-level tabs ===== */
-.app-tabs{display:flex;align-items:stretch;gap:4px;padding:0 36px;background:var(--surface);border-bottom:1px solid var(--line);height:44px;position:relative}
+.app-tabs{display:flex;align-items:stretch;gap:24px;padding:0 36px;background:var(--surface);border-bottom:1px solid var(--line);height:44px;position:relative}
 .app-tab{position:relative;padding:0 28px;font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--fg-mute);transition:all .12s;font-weight:500;display:flex;align-items:center;gap:8px}
 .app-tab:hover{color:var(--fg-soft);background:rgba(240,237,229,.03)}
 .app-tab.on{color:var(--fg);background:var(--bg)}
