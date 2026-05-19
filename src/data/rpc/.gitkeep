@@ -1,0 +1,9 @@
+# Phase 2.1 — RPC fallback for fields AaveKit GraphQL omits:
+#   - AaveOracle.getReserveSource(reserveId)   (per-reserve price feed addr)
+#   - Hub.getAssetDeficitRay(assetId)          (bad debt, usually 0)
+#   - Spoke.ORACLE()                           (per-spoke oracle addr)
+#   - Spoke.MAX_USER_RESERVES_LIMIT()          (immutable)
+#
+# Implementation pattern:
+#   - viem PublicClient with fallback transport: drpc -> llamarpc -> merkle -> ankr
+#   - One multicall batch per page load, merged into transform.ts output
