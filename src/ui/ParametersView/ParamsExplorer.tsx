@@ -472,7 +472,7 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
         </div>
       </header>
 
-      <Section title="Aggregates" hint="Hub.summary — sum of all assets in this hub">
+      <Section title="Aggregates" hint="Totals across every asset listed on this hub">
         <Grid cols={4}>
           <Stat
             n={fmtUSD(hub.summary.totalSupplied)}
@@ -491,7 +491,7 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
 
       <Section
         title="Assets"
-        hint={`${hub.assets.length} HubAssets · settings + per-asset state (PARAMS.md §A.2)`}
+        hint={`${hub.assets.length} assets listed · settings, caps, and live state`}
       >
         <div className="pp-table">
           <div className="pp-table-h">
@@ -585,7 +585,7 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
       </Section>
 
       {inCl.length + outCl.length > 0 && (
-        <Section title="Credit lines" hint="HubSpokeConfig — cross-hub credit flows (PARAMS.md §A.4)">
+        <Section title="Credit lines" hint="Assets a spoke can borrow from a hub other than its parent — cross-hub credit flows">
           <div className="pp-cl-list">
             {inCl.map((cl, i) => (
               <CreditRow key={'i' + i} cl={cl} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
@@ -794,7 +794,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
         </div>
       </header>
 
-      <Section title="Aggregates" hint="Spoke.summary (PARAMS.md §B.1)">
+      <Section title="Aggregates" hint="Totals across every reserve in this spoke">
         <Grid cols={4}>
           <Stat n={fmtUSD(spoke.summary.totalSupplied)} k="Supplied" />
           <Stat n={fmtUSD(spoke.summary.totalBorrowed)} k="Borrowed" />
@@ -805,7 +805,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
 
       <Section
         title="Liquidation engine"
-        hint="One LiquidationConfig per Spoke (PARAMS.md §B.2 — Dutch auction)"
+        hint="Dutch-auction profile that applies to every reserve in this spoke (replaces V3's fixed close factor and bonus)"
       >
         <div className="pp-liq">
           <div className="pp-liq-params">
@@ -825,7 +825,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
         </div>
       </Section>
 
-      <Section title="Reserves" hint={`${spoke.reserves.length} reserves · per-reserve risk + dynamic config`}>
+      <Section title="Reserves" hint={`${spoke.reserves.length} reserves · risk parameters and live state`}>
         <div className="pp-table reserves">
           <div className="pp-table-h">
             <div>Reserve</div>
@@ -877,7 +877,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
       </Section>
 
       {credits.length > 0 && (
-        <Section title="Incoming credit lines" hint="HubSpokeConfig — credit assets routed to this spoke">
+        <Section title="Incoming credit lines" hint="Credit this spoke can draw from other hubs">
           <div className="pp-cl-list">
             {credits.map((cl, i) => (
               <CreditRow key={i} cl={cl} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
@@ -963,21 +963,33 @@ function ReserveDetail({ reserve: r, spoke, api, helpers, meta, onSelect }: Rese
 
       <Section
         title="Dynamic reserve config"
-        hint="Latest key — versioned. Existing positions on older keys retain their original CF / maxLB / fee (PARAMS.md §B.4)"
+        hint="Risk parameters at the latest config version. When governance tightens these, existing positions keep their original terms until they next refresh — only new positions get the updated values."
       >
         <Grid cols={4}>
-          <Stat n={fmtPct(r.collateralFactor, 0)} k="Collateral factor (CF)" sub="single value, no LTV-LT gap" />
+          <Stat
+            n={fmtPct(r.collateralFactor, 0)}
+            k="Collateral factor (CF)"
+            sub="share of value usable as borrowing power"
+          />
           <Stat
             n={fmtPct(r.maxLiquidationBonus, 1)}
             k="Max liquidation bonus"
-            sub="encoded as PERCENTAGE_FACTOR + bonus"
+            sub="maximum discount a liquidator can receive"
           />
-          <Stat n={fmtPct(r.liquidationFee, 0)} k="Liquidation fee" sub="protocol's slice" />
-          <Stat n={fmtBps(r.collateralRisk)} k="Collateral risk" sub="feeds risk premium" />
+          <Stat
+            n={fmtPct(r.liquidationFee, 0)}
+            k="Liquidation fee"
+            sub="protocol's cut of that bonus"
+          />
+          <Stat
+            n={fmtBps(r.collateralRisk)}
+            k="Collateral risk"
+            sub="risk score that drives the borrower's risk premium"
+          />
         </Grid>
       </Section>
 
-      <Section title="Static reserve config" hint="Non-versioned subset (PARAMS.md §B.3)">
+      <Section title="Static reserve config" hint="Reserve-level flags that apply immediately to all positions">
         <div className="pp-table compact">
           <KV k="Borrowable" mono>
             {r.borrowable ? 'true' : 'false'}
@@ -1005,7 +1017,7 @@ function ReserveDetail({ reserve: r, spoke, api, helpers, meta, onSelect }: Rese
 
       <Section
         title="Oracle"
-        hint="Per-reserve price feed bound through Spoke.ORACLE() (PARAMS.md §B.5 — RPC-only)"
+        hint="The price feed contract this reserve reads from. Each spoke routes through a single oracle that holds one feed per reserve."
       >
         <Grid cols={3}>
           <Stat
@@ -1025,7 +1037,7 @@ function ReserveDetail({ reserve: r, spoke, api, helpers, meta, onSelect }: Rese
       {hubAsset && hubAsset.irm && (
         <Section
           title="Hub-level IRM"
-          hint="Curve set at the Hub asset level (PARAMS.md §A.3). All Spokes sharing this asset share this curve."
+          hint="Interest rate curve set at the hub-asset level — every spoke listing this asset shares the same curve."
         >
           <div className="pp-irm-full">
             <IrmCurve

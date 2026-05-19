@@ -26,9 +26,9 @@ export default function App() {
         <div className="meta">
           <span>
             <span className="dot" />
-            Live · proposed market structure
+            Live data
           </span>
-          <span>Ethereum · v4-RC1</span>
+          <span>Ethereum mainnet</span>
         </div>
       </header>
       <nav className="app-tabs">
