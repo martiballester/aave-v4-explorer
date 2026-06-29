@@ -58,12 +58,12 @@ function OverviewInner({
   onSelectHub,
 }: InnerProps) {
   const totals = useMemo(() => {
+    const uniqueAssetSymbols = new Set<string>();
     let supplied = 0,
       borrowed = 0,
       supplyCap = 0,
       borrowCap = 0,
-      assetCount = 0,
-      uniqueAssetSymbols = new Set<string>();
+      assetCount = 0;
     for (const h of data.hubs) {
       supplied += h.summary.totalSupplied;
       borrowed += h.summary.totalBorrowed;

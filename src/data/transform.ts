@@ -22,7 +22,7 @@ import type {
   HubSpokeConfigForPair,
 } from './graphql/types';
 import type { RpcReads } from './rpc/reads';
-import { HUB_ADDRESS_TO_ID, HUB_EDITORIAL, deriveSpokeSlug, spokeTypeFor } from './editorial';
+import { deriveHubId, deriveSpokeSlug, hubEditorialFor, spokeTypeFor } from './editorial';
 
 const num = (s: string | null | undefined): number => {
   if (s == null) return 0;
@@ -33,10 +33,6 @@ const pct = (s: string | null | undefined): number => num(s) / 100; // .normaliz
 
 function ZERO_ADDR(): Address {
   return '0x0000000000000000000000000000000000000000' as Address;
-}
-
-function hubIdFromAddress(addr: string): HubId | null {
-  return HUB_ADDRESS_TO_ID[addr] ?? null;
 }
 
 function buildIrm(settings: GqlHubAsset['settings']): IRM | null {
@@ -83,12 +79,32 @@ export interface RawData {
 }
 
 export function transform(raw: RawData): AaveParams {
+  // Build a stable address→id map from the authoritative hub list — the only
+  // source carrying both address and on-chain name. Every other reference
+  // (spokes, reserves, credit lines) resolves a hub by address through this
+  // closure, mirroring how spokes resolve via slugByAddress. Unlike before, an
+  // unrecognized hub is no longer dropped: it gets a derived id here and a
+  // neutral default profile from hubEditorialFor below.
+  const hubIdByAddr = new Map<string, HubId>();
+  const idOwner = new Map<string, string>(); // derived id → address that claimed it
+  for (const h of raw.hubs) {
+    let id = deriveHubId(h.address, h.name);
+    const owner = idOwner.get(id);
+    if (owner && owner !== h.address.toLowerCase()) {
+      id = `${id}-${h.address.slice(2, 6).toLowerCase()}`; // disambiguate slug collision
+    }
+    idOwner.set(id, h.address.toLowerCase());
+    hubIdByAddr.set(h.address.toLowerCase(), id);
+  }
+  const hubIdFromAddress = (addr: string): HubId | null =>
+    hubIdByAddr.get(addr.toLowerCase()) ?? null;
+
   // ---------- 1. Hubs (without assets yet) ----------
   const hubsById = new Map<HubId, Hub>();
   for (const h of raw.hubs) {
     const id = hubIdFromAddress(h.address);
-    if (!id) continue;
-    const ed = HUB_EDITORIAL[id];
+    if (!id) continue; // type-narrowing only; the pre-pass guarantees a hit
+    const ed = hubEditorialFor(id, h.name);
     hubsById.set(id, {
       id,
       label: ed.label,

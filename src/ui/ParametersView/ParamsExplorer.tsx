@@ -61,15 +61,24 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
   const P_HUB_NAMES = hubNames;
   const P_META = assetMeta;
 
-  const [selected, setSelected] = useState<Selected>(initialSelection ?? { kind: 'hub', id: 'core' });
-  const [openHubs, setOpenHubs] = useState<Record<string, boolean>>({ core: true, prime: true, plus: true });
+  const [selected, setSelected] = useState<Selected>(
+    initialSelection ?? { kind: 'hub', id: P_HUBS[0]?.id ?? 'core' },
+  );
+  const [openHubs, setOpenHubs] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(P_HUBS.map((h) => [h.id, true])),
+  );
   const [openSpokes, setOpenSpokes] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState('');
 
   const matches = (s: string) => !query || s.toLowerCase().includes(query.toLowerCase());
 
   return (
-    <div className="pp-root">
+    <div
+      className="pp-root"
+      // Expose each hub's color as a CSS var so credit-line routes (which read
+      // `var(--hub-{id})`) resolve for any hub, including auto-discovered ones.
+      style={Object.fromEntries(P_HUBS.map((h) => ['--hub-' + h.id, h.color])) as CSSProperties}
+    >
       <aside className="pp-side">
         <div className="pp-search">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

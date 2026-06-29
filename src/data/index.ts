@@ -24,12 +24,10 @@ import { fetchRpc } from './rpc/reads';
 import { ASSET_META } from './editorial';
 import type { AaveParams, Topology } from './types';
 
-const HUB_NAMES = { core: 'Core', plus: 'Plus', prime: 'Prime' } as const;
-
 const EMPTY_TOPOLOGY: Topology = {
   hubs: [],
   creditLines: [],
-  HUB_NAMES,
+  HUB_NAMES: {},
   assetMeta: ASSET_META,
 };
 
@@ -154,6 +152,10 @@ export function useAaveParams() {
 export function useTopology(): Topology {
   const { data } = useAaveParams();
   if (!data) return EMPTY_TOPOLOGY;
+  // Hub display names are derived from the live hub list, so every hub —
+  // including auto-discovered ones — resolves in credit-line labels.
+  const hubNames: Record<string, string> = {};
+  for (const h of data.hubs) hubNames[h.id] = h.label;
   return {
     hubs: data.hubs.map((h) => ({
       id: h.id,
@@ -168,7 +170,7 @@ export function useTopology(): Topology {
       toSpoke: cl.toSpoke,
       assets: cl.assets,
     })),
-    HUB_NAMES,
+    HUB_NAMES: hubNames,
     assetMeta: ASSET_META,
   };
 }

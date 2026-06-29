@@ -1,7 +1,10 @@
 // Types per handoff/DATA-CONTRACT.md. Field-for-field with the spec — do not
 // reshape these without updating the contract.
 
-export type HubId = 'core' | 'plus' | 'prime';
+// Hub ids are open-ended: core/plus/prime are curated, but any hub the API
+// returns is accepted (id derived from its on-chain name) so new hubs
+// auto-discover. Treat as a string; HUB_EDITORIAL is an override, not a gate.
+export type HubId = string;
 export type Address = `0x${string}`;
 
 export interface IRM {

@@ -28,6 +28,44 @@ export const HUB_ADDRESS_TO_ID: Record<string, HubId> = {
   '0x943827DCA022D0F354a8a8c332dA1e5Eb9f9F931': 'prime',
 };
 
+// Neutral fallback color for hubs without a curated editorial entry — matches
+// the `--general` token / DEFAULT_ASSET_META.color used for unknown spokes.
+const DEFAULT_HUB_COLOR = '#8C969A';
+
+function prettifyHubId(id: string): string {
+  return id
+    .split('-')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+// Stable hub id: pinned override by address, else a kebab slug of the on-chain
+// name. Mirrors deriveSpokeSlug — known hubs keep core/plus/prime, a brand-new
+// hub gets e.g. `edge` automatically with no editorial change.
+export function deriveHubId(address: string, name: string): HubId {
+  const pinned = HUB_ADDRESS_TO_ID[address];
+  if (pinned) return pinned;
+  const slug = (name || address)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || address.toLowerCase();
+}
+
+// Editorial profile for a hub id: curated override if present, else a neutral
+// default (grey, name-derived label). Mirrors assetMetaFor / spokeTypeFor so an
+// unrecognized hub renders instead of being dropped.
+export function hubEditorialFor(id: HubId, name?: string): HubEditorial {
+  return (
+    HUB_EDITORIAL[id] ?? {
+      tag: '—',
+      color: DEFAULT_HUB_COLOR,
+      label: name?.trim() || prettifyHubId(id),
+    }
+  );
+}
+
 // Optional slug OVERRIDE for known mainnet spokes. Parent-hub assignment is
 // auto-derived from reserves (the hub holding most collateral = parent), so
 // new spokes don't need any editorial change — they just get a derived slug
