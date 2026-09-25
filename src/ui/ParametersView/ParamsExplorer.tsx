@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useScopedParams, useTopology } from '../../data';
+import { useChainScope, useScopedParams, useTopology } from '../../data';
 import type {
   AaveParams,
   AssetMetadata,
@@ -81,6 +81,7 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
     return groups;
   }, [P_HUBS]);
   const showChainHeaders = chainGroups.length > 1;
+  const { setScope } = useChainScope();
   const selHub = selected.kind === 'hub' ? P_API.getHub(selected.id) : undefined;
   const selSpoke = selected.kind !== 'hub' ? P_API.getSpoke(selected.kind === 'spoke' ? selected.id : selected.spokeId) : undefined;
   const selReserve =
@@ -122,10 +123,15 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
           {chainGroups.map((group) => (
           <Fragment key={group.chainId}>
           {showChainHeaders && (!query || group.hubs.some((h) => matches(h.label) || P_SPOKES.some((sp) => sp.hubId === h.id && (matches(sp.name) || sp.reserves.some((r) => matches(r.symbol)))))) && (
-            <div className="pp-chain-head">
+            <button
+              className="pp-chain-head"
+              onClick={() => setScope(group.chainId)}
+              title={`Show only ${group.label}`}
+            >
               <ChainIcon src={group.icon} size={13} />
               <span>{group.label}</span>
-            </div>
+              <span className="pp-chain-head-cta">only this →</span>
+            </button>
           )}
           {group.hubs.map((hub) => {
             const open = openHubs[hub.id];

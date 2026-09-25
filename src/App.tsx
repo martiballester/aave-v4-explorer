@@ -103,8 +103,8 @@ export default function App() {
           >
             Parameters
           </button>
-          <ChainSwitcher />
         </nav>
+        <ChainSwitcher />
         {/* Keyed by scope: each view's local selection resets when the
             network changes, so it never points at a hub that left scope. */}
         <div className="tab-body" key={String(scope)}>

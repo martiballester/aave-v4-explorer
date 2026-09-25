@@ -188,7 +188,10 @@
 .pp-lb-empty{padding:18px;border:1px dashed var(--line);color:var(--fg-mute);font-size:12px}
 
 /* Network grouping in the sidebar + chain chip in hub headers */
-.pp-chain-head{display:flex;align-items:center;gap:8px;padding:14px 16px 6px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-mute)}
+.lr-art .pp-chain-head{display:flex;align-items:center;gap:8px;width:100%;padding:14px 16px 6px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-mute);text-align:left}
+.lr-art .pp-chain-head:hover{color:var(--fg)}
+.pp-chain-head-cta{margin-left:auto;font-size:9px;letter-spacing:.08em;opacity:0;transition:opacity .12s}
+.pp-chain-head:hover .pp-chain-head-cta,.pp-chain-head:focus-visible .pp-chain-head-cta{opacity:1}
 .pp-chain-kv{display:inline-flex;align-items:center;gap:6px}
 
 /* credit list */
