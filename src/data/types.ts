@@ -1,9 +1,9 @@
 // Types per handoff/DATA-CONTRACT.md. Field-for-field with the spec — do not
 // reshape these without updating the contract.
 
-// Hub ids are open-ended: core/plus/prime are curated, but any hub the API
-// returns is accepted (id derived from its on-chain name) so new hubs
-// auto-discover. Treat as a string; HUB_EDITORIAL is an override, not a gate.
+// Hub ids are open-ended and chain-scoped: `<chain slug>-<hub name>`, e.g.
+// `ethereum-core`, `avalanche-core`. Any hub the API (or the on-chain crawler)
+// returns is accepted; editorial styling is an override, not a gate.
 export type HubId = string;
 export type Address = `0x${string}`;
 
@@ -59,7 +59,7 @@ export interface Hub {
   color: string;
   address: Address;
   gqlId: string;
-  chain: { chainId: number; name: string; explorer: string };
+  chain: { chainId: number; name: string; explorer: string; slug: string; icon: string };
   summary: {
     totalSupplied: number;
     totalBorrowed: number;
@@ -106,6 +106,7 @@ export interface Reserve {
 
 export interface Spoke {
   id: string;
+  chainId: number;
   name: string;
   type: string;
   address: Address;
@@ -129,6 +130,7 @@ export interface Spoke {
 }
 
 export interface CreditLine {
+  chainId: number;
   from: HubId;
   to: HubId;
   toSpoke: string;
@@ -152,10 +154,34 @@ export interface AssetMetadata {
   icon: string;
 }
 
+// One row per network the explorer knows about — drives the chain switcher and
+// the Overview's network table. `status: 'error'` means the network's data
+// source failed this load; its hubs are simply absent.
+export interface ChainSummary {
+  chainId: number;
+  slug: string;
+  label: string;
+  icon: string;
+  explorer: string;
+  source: 'aavekit' | 'rpc';
+  operator?: string;
+  status: 'ok' | 'error' | 'empty';
+  error?: string;
+  totals: {
+    supplied: number;
+    borrowed: number;
+    hubs: number;
+    spokes: number;
+    reserves: number;
+  };
+}
+
 export interface AaveParams {
+  chains: ChainSummary[];
   hubs: Hub[];
   spokes: Spoke[];
   creditLines: CreditLine[];
+  assetMeta: Record<string, AssetMetadata>;
   helpers: {
     sampleIrmCurve: (irm: IRM | null, n?: number) => CurvePoint[];
     evalBorrowRate: (irm: IRM | null, utilization: number) => number | null;
@@ -170,6 +196,7 @@ export interface AaveParams {
 export interface Topology {
   hubs: Array<{
     id: HubId;
+    chainId: number;
     label: string;
     tag: string;
     color: string;

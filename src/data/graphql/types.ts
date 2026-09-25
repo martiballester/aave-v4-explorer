@@ -34,16 +34,22 @@ export interface GqlHub {
   };
 }
 
+// Token metadata as AaveKit serves it. `icon` is the logo URL Aave's own app
+// uses; `categories` carries tags like STABLECOIN / ETH_CORRELATED.
+export interface GqlTokenInfo {
+  symbol: string;
+  decimals: number;
+  name: string;
+  icon?: string | null;
+  categories?: string[] | null;
+}
+
 export interface GqlHubAsset {
   id: string;
   onchainAssetId: string;
   underlying: {
     address: `0x${string}`;
-    info: {
-      symbol: string;
-      decimals: number;
-      name: string;
-    };
+    info: GqlTokenInfo;
   };
   settings: {
     feeReceiver: `0x${string}`;
@@ -112,7 +118,7 @@ export interface GqlReserve {
     onchainAssetId: string;
     underlying: {
       address: `0x${string}`;
-      info: { symbol: string; decimals: number; name: string };
+      info: GqlTokenInfo;
     };
     hub: { address: `0x${string}`; name: string };
   };
@@ -153,6 +159,7 @@ export interface GqlHubSpokeConfig {
 
 // Adapter shape: the (hub, spoke) coordinates we add back manually.
 export interface HubSpokeConfigForPair {
+  chainId: number;
   hubAddress: `0x${string}`;
   spokeAddress: `0x${string}`;
   entries: GqlHubSpokeConfig[];

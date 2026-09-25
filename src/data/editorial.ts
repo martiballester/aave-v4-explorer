@@ -1,12 +1,6 @@
-// Editorial overrides — fields that don't exist on-chain.
-//
-// Hub colors and tags are LlamaRisk editorial choices. Spoke types
-// ("General"/"e-Mode"/"Specialty") are derived from the spoke's role,
-// and asset metadata (icon URL, display color) is curated.
-//
-// Mainnet spoke addresses pinned 2026-05-19. New spokes appear in
-// `hubSpokeConfigs` automatically; they get a derived slug and a default
-// editorial profile until added here.
+// Editorial overrides — fields that don't exist on-chain. Everything here is
+// OPTIONAL polish: hubs, spokes and assets the tables don't know render with a
+// neutral default instead of being dropped.
 
 import type { AssetMetadata, HubId } from './types';
 
@@ -16,100 +10,82 @@ export interface HubEditorial {
   label: string;
 }
 
-export const HUB_EDITORIAL: Record<HubId, HubEditorial> = {
-  core: { tag: 'Risk-adjusted', color: '#C9B68C', label: 'Core' },
-  plus: { tag: 'Risk-return', color: '#D88E5A', label: 'Plus' },
-  prime: { tag: 'Low risk', color: '#6FB7AE', label: 'Prime' },
+// Keyed by the hub's on-chain / API name, so every chain's "Core" hub shares
+// the Core look (same role, different deployment).
+const HUB_EDITORIAL_BY_NAME: Record<string, Omit<HubEditorial, 'label'>> = {
+  core: { tag: 'Risk-adjusted', color: '#C9B68C' },
+  plus: { tag: 'Risk-return', color: '#D88E5A' },
+  prime: { tag: 'Low risk', color: '#6FB7AE' },
 };
 
-export const HUB_ADDRESS_TO_ID: Record<string, HubId> = {
-  '0xCca852Bc40e560adC3b1Cc58CA5b55638ce826c9': 'core',
-  '0x06002e9c4412CB7814a791eA3666D905871E536A': 'plus',
-  '0x943827DCA022D0F354a8a8c332dA1e5Eb9f9F931': 'prime',
-};
-
-// Neutral fallback color for hubs without a curated editorial entry — matches
-// the `--general` token / DEFAULT_ASSET_META.color used for unknown spokes.
+// Neutral fallback — matches the `--general` token.
 const DEFAULT_HUB_COLOR = '#8C969A';
 
-function prettifyHubId(id: string): string {
-  return id
-    .split('-')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
-
-// Stable hub id: pinned override by address, else a kebab slug of the on-chain
-// name. Mirrors deriveSpokeSlug — known hubs keep core/plus/prime, a brand-new
-// hub gets e.g. `edge` automatically with no editorial change.
-export function deriveHubId(address: string, name: string): HubId {
-  const pinned = HUB_ADDRESS_TO_ID[address];
-  if (pinned) return pinned;
-  const slug = (name || address)
+export function slugify(s: string): string {
+  return s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return slug || address.toLowerCase();
 }
 
-// Editorial profile for a hub id: curated override if present, else a neutral
-// default (grey, name-derived label). Mirrors assetMetaFor / spokeTypeFor so an
-// unrecognized hub renders instead of being dropped.
-export function hubEditorialFor(id: HubId, name?: string): HubEditorial {
-  return (
-    HUB_EDITORIAL[id] ?? {
-      tag: '—',
-      color: DEFAULT_HUB_COLOR,
-      label: name?.trim() || prettifyHubId(id),
-    }
-  );
+/** Stable, chain-scoped hub id: `<chain>-<hub name>`, e.g. `avalanche-core`. */
+export function deriveHubId(chainSlug: string, address: string, name: string): HubId {
+  return `${chainSlug}-${slugify(name) || address.toLowerCase()}`;
 }
 
-// Optional slug OVERRIDE for known mainnet spokes. Parent-hub assignment is
-// auto-derived from reserves (the hub holding most collateral = parent), so
-// new spokes don't need any editorial change — they just get a derived slug
-// like `core-newspoke` automatically. This override only exists to keep the
-// old slug shape for the existing 10 spokes (and to let you rename if you
-// don't like the auto-derived form).
-export const SPOKE_SLUG_BY_ADDRESS: Record<string, string> = {
-  '0x94e7A5dCbE816e498b89aB752661904E2F56c485': 'core-main',
-  '0xe1900480ac69f0B296841Cd01cC37546d92F35Cd': 'core-lido',
-  '0xbF10BDfE177dE0336aFD7fcCF80A904E15386219': 'core-etherfi',
-  '0x3131FE68C4722e726fe6B2819ED68e514395B9a4': 'core-kelp',
-  '0x7EC68b5695e803e98a21a9A05d744F28b0a7753D': 'core-lombard',
-  '0x65407b940966954b23dfA3caA5C0702bB42984DC': 'core-gold',
-  '0xD8B93635b8C6d0fF98CbE90b5988E3F2d1Cd9da1': 'core-forex',
-  '0x973a023A77420ba610f06b3858aD991Df6d85A08': 'prime-bluechip',
-  '0x58131E79531caB1d52301228d1f7b842F26B9649': 'plus-correlated',
-  '0xba1B3D55D249692b669A164024A838309B7508AF': 'plus-ethena',
-};
+/** Curated profile by name, else neutral grey with the on-chain name. An
+ *  explicit seed (from chains.ts, for RPC-crawled hubs) wins over both. */
+export function hubEditorialFor(
+  name: string,
+  seed?: { label?: string; tag?: string; color?: string },
+): HubEditorial {
+  const byName = HUB_EDITORIAL_BY_NAME[name.trim().toLowerCase()];
+  return {
+    label: seed?.label ?? name.trim(),
+    tag: seed?.tag ?? byName?.tag ?? '—',
+    color: seed?.color ?? byName?.color ?? DEFAULT_HUB_COLOR,
+  };
+}
 
-// Editorial spoke type — drives the matrix tab's row grouping. Purely
-// aesthetic; new spokes default to 'General' until pinned here.
-export const SPOKE_TYPE_BY_SLUG: Record<string, string> = {
-  'core-main': 'General',
-  'core-lido': 'e-Mode',
-  'core-etherfi': 'e-Mode',
-  'core-kelp': 'e-Mode',
-  'core-lombard': 'e-Mode',
-  'core-gold': 'Specialty',
-  'core-forex': 'Specialty',
-  'prime-bluechip': 'General',
-  'plus-correlated': 'e-Mode',
-  'plus-ethena': 'General',
+/** Chain-scoped spoke id: `<hub id>-<spoke name>`, e.g. `ethereum-core-main`. */
+export function deriveSpokeSlug(hubId: HubId, name: string, address: string): string {
+  return `${hubId}-${slugify(name) || address.toLowerCase()}`;
+}
+
+// Editorial spoke type — drives the matrix tab's row grouping. Keyed by name
+// so the same spoke family reads the same on every chain.
+const SPOKE_TYPE_BY_NAME: Record<string, string> = {
+  main: 'General',
+  bluechip: 'General',
+  'ethena ecosystem': 'General',
+  lido: 'e-Mode',
+  etherfi: 'e-Mode',
+  kelp: 'e-Mode',
+  lombard: 'e-Mode',
+  'ethena correlated': 'e-Mode',
+  gold: 'Specialty',
+  forex: 'Specialty',
 };
 
 // Heuristic fallback: name-based inference for unknown spokes.
-export function inferSpokeTypeFromName(name: string): string {
-  const n = name.toLowerCase();
+export function spokeTypeFor(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (SPOKE_TYPE_BY_NAME[n]) return SPOKE_TYPE_BY_NAME[n];
   if (n.includes('correlated') || n.includes('emode') || n.includes('e-mode')) return 'e-Mode';
-  if (n.includes('lido') || n.includes('etherfi') || n.includes('kelp') || n.includes('lombard'))
-    return 'e-Mode';
   if (n.includes('gold') || n.includes('forex') || n.includes('rwa') || n.includes('isolation'))
     return 'Specialty';
   return 'General';
 }
+
+// ---------------------------------------------------------------------------
+// Asset metadata. Resolution order for a symbol:
+//   1. ASSET_META (curated icons from app.aave.com)
+//   2. the icon AaveKit serves for the token
+//   3. a generated token logo keyed by chain + address (letter avatar if the
+//      token is unknown) — covers RPC-crawled chains AaveKit doesn't index
+// PTs take their underlying's icon (PT-sUSDE-7MAY2026 → sUSDe), ringed in the
+// PT color by the UI; credit-line reserves (cUSDC) take the base token's icon.
+// ---------------------------------------------------------------------------
 
 const AV = 'https://app.aave.com/icons/tokens/';
 
@@ -136,43 +112,106 @@ export const ASSET_META: Record<string, AssetMetadata> = {
   LINK: { type: 'other', color: '#335DD2', name: 'Chainlink', icon: AV + 'link.svg' },
   AAVE: { type: 'other', color: '#9CA3AF', name: 'Aave', icon: AV + 'aave.svg' },
   XAUt: { type: 'gold', color: '#FFD700', name: 'Tether Gold', icon: AV + 'xaut.svg' },
-  'PT-sUSDe': { type: 'pt', color: '#B89BD9', name: 'PT sUSDe', icon: AV + 'ptsusde.svg' },
-  'PT-USDe': { type: 'pt', color: '#B89BD9', name: 'PT USDe', icon: AV + 'ptusde.svg' },
-  'PT-USDG': { type: 'pt', color: '#B89BD9', name: 'PT USDG', icon: AV + 'ptusdg.svg' },
-  cUSDT: { type: 'credit', color: '#26A17B', name: 'Credit USDT', icon: AV + 'usdt.svg' },
-  cUSDC: { type: 'credit', color: '#2775CA', name: 'Credit USDC', icon: AV + 'usdc.svg' },
-  cUSDG: { type: 'credit', color: '#26A17B', name: 'Credit USDG', icon: AV + 'usdg.svg' },
-  cRLUSD: { type: 'credit', color: '#26A17B', name: 'Credit RLUSD', icon: AV + 'rlusd.svg' },
-  cEURC: { type: 'credit', color: '#0052B4', name: 'Credit EURC', icon: AV + 'eurc.svg' },
-  cfrxUSD: { type: 'credit', color: '#26A17B', name: 'Credit frxUSD', icon: AV + 'frax.svg' },
-  cUSDe: { type: 'credit', color: '#26A17B', name: 'Credit USDe', icon: AV + 'usde.svg' },
-  cGHO: { type: 'credit', color: '#26A17B', name: 'Credit GHO', icon: AV + 'gho.svg' },
 };
 
-const DEFAULT_ASSET_META: AssetMetadata = {
-  type: 'other',
-  color: '#8C969A',
-  name: '',
-  icon: '',
+const TYPE_COLOR: Record<AssetMetadata['type'], string> = {
+  eth: '#627EEA',
+  btc: '#F7931A',
+  stable: '#26A17B',
+  eur: '#0052B4',
+  gold: '#FFD700',
+  pt: '#B89BD9',
+  credit: '#C76B58',
+  lst: '#627EEA',
+  lrt: '#627EEA',
+  other: '#8C969A',
 };
 
-export function assetMetaFor(symbol: string): AssetMetadata {
-  return ASSET_META[symbol] ?? { ...DEFAULT_ASSET_META, name: symbol };
+const PT_RE = /^PT-(.+)-\d{1,2}[A-Z]{3}\d{2,4}$/i;
+
+/** `PT-sUSDE-7MAY2026` → `sUSDE`; null for non-PT symbols. */
+export function ptBaseSymbol(symbol: string): string | null {
+  return PT_RE.exec(symbol)?.[1] ?? null;
 }
 
-export function deriveSpokeSlug(address: string, hubId: HubId, name: string): string {
-  const pinned = SPOKE_SLUG_BY_ADDRESS[address];
-  if (pinned) return pinned;
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `${hubId}-${slug}`;
+function inferType(symbol: string, categories: string[]): AssetMetadata['type'] {
+  const s = symbol.toUpperCase();
+  if (ptBaseSymbol(symbol)) return 'pt';
+  if (categories.includes('ETH_CORRELATED') || (/ETH$/.test(s) && !s.includes('ETHFI'))) return 'eth';
+  if (s.includes('BTC')) return 'btc';
+  if (s.includes('EUR')) return 'eur';
+  if (/XAU|PAXG|GOLD/.test(s)) return 'gold';
+  if (categories.includes('STABLECOIN') || /USD|GHO/.test(s)) return 'stable';
+  return 'other';
 }
 
-export function spokeTypeFor(slug: string, fallbackName?: string): string {
-  return (
-    SPOKE_TYPE_BY_SLUG[slug] ??
-    (fallbackName ? inferSpokeTypeFromName(fallbackName) : 'General')
-  );
+export interface TokenSeen {
+  symbol: string;
+  chainId: number;
+  address: string;
+  name?: string;
+  icon?: string | null;
+  categories?: string[] | null;
+}
+
+const generatedIcon = (t: TokenSeen) =>
+  `https://token-logos.family.co/asset?id=${t.chainId}:${t.address}&token=${encodeURIComponent(t.symbol)}`;
+
+/** Build the symbol → metadata table for every token the data layer saw.
+ *  `aliases` maps display symbols the transform invented (credit-line `cUSDC`,
+ *  de-duplicated `iwSPYx·c833`) to the underlying token symbol. */
+export function buildAssetMeta(
+  tokens: TokenSeen[],
+  aliases: Array<{ symbol: string; base: string; credit?: boolean }>,
+): Record<string, AssetMetadata> {
+  const meta: Record<string, AssetMetadata> = {};
+  const byLower = new Map<string, AssetMetadata>();
+  const put = (sym: string, m: AssetMetadata) => {
+    meta[sym] = m;
+    if (!byLower.has(sym.toLowerCase())) byLower.set(sym.toLowerCase(), m);
+  };
+  const lookup = (sym: string) =>
+    meta[sym] ?? ASSET_META[sym] ?? byLower.get(sym.toLowerCase()) ??
+    Object.entries(ASSET_META).find(([k]) => k.toLowerCase() === sym.toLowerCase())?.[1];
+
+  // Pass 1: plain tokens (PTs need their base resolved first).
+  for (const t of tokens) {
+    if (meta[t.symbol] || ptBaseSymbol(t.symbol)) continue;
+    const curated = ASSET_META[t.symbol];
+    const type = curated?.type ?? inferType(t.symbol, t.categories ?? []);
+    put(t.symbol, {
+      type,
+      color: curated?.color ?? TYPE_COLOR[type],
+      name: curated?.name ?? t.name ?? t.symbol,
+      icon: curated?.icon ?? t.icon ?? generatedIcon(t),
+    });
+  }
+  // Pass 2: PTs borrow the underlying's icon (case-insensitive: the PT for
+  // sUSDe is spelled PT-sUSDE-…).
+  for (const t of tokens) {
+    const base = ptBaseSymbol(t.symbol);
+    if (!base || meta[t.symbol]) continue;
+    const baseMeta = lookup(base);
+    put(t.symbol, {
+      type: 'pt',
+      color: TYPE_COLOR.pt,
+      name: t.name ?? t.symbol,
+      icon: baseMeta?.icon ?? t.icon ?? generatedIcon(t),
+    });
+  }
+  // Pass 3: display aliases.
+  for (const a of aliases) {
+    const baseMeta = lookup(a.base);
+    if (!baseMeta) continue;
+    meta[a.symbol] = a.credit
+      ? { ...baseMeta, type: 'credit', name: `Credit ${a.base}` }
+      : baseMeta;
+  }
+  return meta;
+}
+
+const DEFAULT_ASSET_META: AssetMetadata = { type: 'other', color: '#8C969A', name: '', icon: '' };
+
+export function assetMetaFor(meta: Record<string, AssetMetadata>, symbol: string): AssetMetadata {
+  return meta[symbol] ?? { ...DEFAULT_ASSET_META, name: symbol };
 }

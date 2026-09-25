@@ -159,9 +159,37 @@
 .pp-spoke-card-body{display:flex;flex-direction:column;gap:0}
 
 /* liquidation */
-.pp-liq{display:grid;grid-template-columns:1fr 1.2fr;gap:28px;align-items:start}
+.pp-liq{display:flex;flex-direction:column;gap:16px}
 .pp-liq-params{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border:1px solid var(--line);background:var(--surface)}
-.pp-dutch{display:block;background:rgba(0,0,0,.15);border:1px solid var(--line);border-radius:2px}
+
+/* Liquidation bonus chart */
+.pp-lb{--pp-lb-surface:#0A1F23;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(220px,1fr);gap:20px;align-items:start}
+.pp-lb-plot{position:relative;background:var(--pp-lb-surface);border:1px solid var(--line);border-radius:2px;outline:none}
+.pp-lb-plot:focus-visible{border-color:var(--fg-mute)}
+.pp-lb-svg{display:block;cursor:crosshair;touch-action:none}
+.pp-lb-tick{fill:var(--fg-mute);font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums}
+.pp-lb-axis{fill:var(--fg-mute);font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.pp-lb-zone{fill:var(--fg-mute);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase}
+.pp-lb-tip{position:absolute;top:34px;transform:translateX(12px);min-width:170px;max-width:240px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--line);border-radius:3px;box-shadow:0 6px 18px rgba(0,0,0,.35);pointer-events:none;font-size:11.5px;z-index:2}
+.pp-lb-tip.flip{transform:translateX(calc(-100% - 12px))}
+.pp-lb-tip-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px;color:var(--fg)}
+.pp-lb-tip-h span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-mute)}
+.pp-lb-tip-row{display:grid;grid-template-columns:12px auto 1fr;align-items:center;gap:8px;padding:2px 0}
+.pp-lb-tip-row b{color:var(--fg);font-weight:600}
+.pp-lb-tip-syms{color:var(--fg-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-lb-tip-note{color:var(--fg-soft)}
+.pp-lb-key{display:inline-block;width:12px;height:2px;border-radius:1px}
+.pp-lb-legend{display:flex;flex-direction:column;gap:10px;padding-top:4px}
+.pp-lb-leg-row{display:grid;grid-template-columns:12px 1fr;column-gap:8px;row-gap:4px;align-items:center}
+.pp-lb-leg-v{color:var(--fg);font-size:12px}
+.pp-lb-leg-assets{grid-column:2;display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--fg-soft);font-size:11.5px}
+.pp-lb-leg-asset{display:inline-flex;align-items:center;gap:5px}
+.pp-lb-leg-note{font-size:11px;color:var(--fg-mute)}
+.pp-lb-empty{padding:18px;border:1px dashed var(--line);color:var(--fg-mute);font-size:12px}
+
+/* Network grouping in the sidebar + chain chip in hub headers */
+.pp-chain-head{display:flex;align-items:center;gap:8px;padding:14px 16px 6px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-mute)}
+.pp-chain-kv{display:inline-flex;align-items:center;gap:6px}
 
 /* credit list */
 .pp-cl-list{display:flex;flex-direction:column;gap:6px}
@@ -215,6 +243,6 @@
 @media (max-width:920px){
   .pp-root{grid-template-columns:1fr}
   .pp-side{display:none}
-  .pp-liq{grid-template-columns:1fr}
+  .pp-lb{grid-template-columns:1fr}
   .pp-asset-expanded{grid-template-columns:1fr}
 }

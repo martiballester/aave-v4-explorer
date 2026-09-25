@@ -1,14 +1,16 @@
 import { useMemo } from 'react';
-import { useAaveParams, useTopology } from '../../data';
-import type { AaveParams, Hub, HubId } from '../../data/types';
+import { useChainScope, useScopedParams, type ChainScope } from '../../data';
+import type { AaveParams, AssetMetadata, ChainSummary, Hub, HubId } from '../../data/types';
+import { AssetGlyph } from '../AssetGlyph';
+import { ChainIcon } from '../ChainSwitcher';
 
 interface OverviewProps {
   onSelectHub: (id: HubId) => void;
 }
 
 export function Overview({ onSelectHub }: OverviewProps) {
-  const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useAaveParams();
-  const topology = useTopology();
+  const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useScopedParams();
+  const { scope, setScope } = useChainScope();
 
   if (isLoading || !data) {
     return (
@@ -22,7 +24,8 @@ export function Overview({ onSelectHub }: OverviewProps) {
   return (
     <OverviewInner
       data={data}
-      assetMeta={topology.assetMeta}
+      scope={scope}
+      onSelectChain={setScope}
       isFetching={isFetching}
       dataUpdatedAt={dataUpdatedAt}
       onRefresh={() => refetch()}
@@ -33,7 +36,8 @@ export function Overview({ onSelectHub }: OverviewProps) {
 
 interface InnerProps {
   data: AaveParams;
-  assetMeta: ReturnType<typeof useTopology>['assetMeta'];
+  scope: ChainScope;
+  onSelectChain: (s: ChainScope) => void;
   isFetching: boolean;
   dataUpdatedAt: number;
   onRefresh: () => void;
@@ -51,7 +55,8 @@ const fmtPct = (n: number, d = 1): string => (n * 100).toFixed(d) + '%';
 
 function OverviewInner({
   data,
-  assetMeta,
+  scope,
+  onSelectChain,
   isFetching,
   dataUpdatedAt,
   onRefresh,
@@ -90,6 +95,12 @@ function OverviewInner({
     };
   }, [data]);
 
+  const scopeLabel =
+    scope === 'all'
+      ? `${data.chains.filter((c) => c.status === 'ok').length} networks`
+      : data.chains.find((c) => c.chainId === scope)?.label ?? '';
+  const multiChain = scope === 'all';
+
   return (
     <div className="ov-root">
       <header className="ov-head">
@@ -97,7 +108,7 @@ function OverviewInner({
           <h1 className="ov-title">Aave V4 — Protocol overview</h1>
           <p className="ov-sub">
             {totals.hubCount} hubs · {totals.spokeCount} spokes · {totals.reserveCount} reserves ·{' '}
-            {totals.creditLineCount} cross-hub credit lines · Ethereum mainnet
+            {totals.creditLineCount} cross-hub credit lines · {scopeLabel}
           </p>
         </div>
         <div className="ov-meta">
@@ -149,6 +160,13 @@ function OverviewInner({
         </div>
       </section>
 
+      {multiChain && (
+        <section className="ov-section">
+          <div className="lr-eyebrow ov-section-title">Networks</div>
+          <NetworkTable chains={data.chains} onSelect={onSelectChain} />
+        </section>
+      )}
+
       <section className="ov-section">
         <div className="lr-eyebrow ov-section-title">Hubs</div>
         <div className="ov-hubs">
@@ -159,7 +177,8 @@ function OverviewInner({
               spokeCount={data.spokes.filter((s) => s.hubId === hub.id).length}
               creditLinesIn={data.creditLines.filter((c) => c.to === hub.id).length}
               creditLinesOut={data.creditLines.filter((c) => c.from === hub.id).length}
-              assetMeta={assetMeta}
+              assetMeta={data.assetMeta}
+              showChain={multiChain}
               onClick={() => onSelectHub(hub.id)}
             />
           ))}
@@ -169,16 +188,68 @@ function OverviewInner({
   );
 }
 
+// One row per network: where V4's supply sits, and which sources loaded.
+function NetworkTable({
+  chains,
+  onSelect,
+}: {
+  chains: ChainSummary[];
+  onSelect: (s: ChainScope) => void;
+}) {
+  return (
+    <div className="ov-net">
+      <div className="ov-net-h">
+        <div>Network</div>
+        <div className="r">Supplied</div>
+        <div className="r">Borrowed</div>
+        <div className="r">Util.</div>
+        <div className="r">Hubs</div>
+        <div className="r">Spokes</div>
+        <div className="r">Reserves</div>
+        <div>Source</div>
+      </div>
+      {chains.map((c) => {
+        const util = c.totals.supplied > 0 ? c.totals.borrowed / c.totals.supplied : 0;
+        return (
+          <button key={c.chainId} className="ov-net-r" onClick={() => onSelect(c.chainId)}>
+            <div className="ov-net-name">
+              <ChainIcon src={c.icon} size={16} />
+              <span>{c.label}</span>
+              {c.operator && <span className="chain-op">{c.operator}</span>}
+            </div>
+            <div className="r pp-mono">{c.status === 'ok' ? fmtUSD(c.totals.supplied) : '—'}</div>
+            <div className="r pp-mono">{c.status === 'ok' ? fmtUSD(c.totals.borrowed) : '—'}</div>
+            <div className="r pp-mono">{c.status === 'ok' ? fmtPct(util, 1) : '—'}</div>
+            <div className="r pp-mono">{c.totals.hubs}</div>
+            <div className="r pp-mono">{c.totals.spokes}</div>
+            <div className="r pp-mono">{c.totals.reserves}</div>
+            <div className={'ov-net-src ' + c.status} title={c.error}>
+              {c.status === 'error'
+                ? 'failed to load'
+                : c.status === 'empty'
+                  ? 'no hubs listed'
+                  : c.source === 'rpc'
+                    ? 'on-chain reads'
+                    : 'AaveKit'}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 interface HubCardProps {
   hub: Hub;
   spokeCount: number;
   creditLinesIn: number;
   creditLinesOut: number;
-  assetMeta: ReturnType<typeof useTopology>['assetMeta'];
+  assetMeta: Record<string, AssetMetadata>;
+  showChain: boolean;
   onClick: () => void;
 }
 
-function HubCard({ hub, spokeCount, creditLinesIn, creditLinesOut, assetMeta, onClick }: HubCardProps) {
+function HubCard({ hub, spokeCount, creditLinesIn, creditLinesOut, assetMeta, showChain, onClick }: HubCardProps) {
   const topAssets = useMemo(
     () => [...hub.assets].sort((a, b) => b.summary.supplied - a.summary.supplied).slice(0, 6),
     [hub.assets],
@@ -191,8 +262,14 @@ function HubCard({ hub, spokeCount, creditLinesIn, creditLinesOut, assetMeta, on
       <div className="ov-hub-card-h">
         <span className="ov-hub-bullet" style={{ background: hub.color }} />
         <span className="ov-hub-name">{hub.label}</span>
-        <span className="lr-eyebrow ov-hub-tag">{hub.tag}</span>
+        {hub.tag !== '—' && <span className="lr-eyebrow ov-hub-tag">{hub.tag}</span>}
       </div>
+      {showChain && (
+        <div className="ov-hub-chain">
+          <ChainIcon src={hub.chain.icon} size={12} />
+          <span>{hub.chain.name}</span>
+        </div>
+      )}
 
       <div className="ov-hub-stats">
         <div>
@@ -232,23 +309,16 @@ function HubCard({ hub, spokeCount, creditLinesIn, creditLinesOut, assetMeta, on
       </div>
 
       <div className="ov-hub-glyphs">
-        {topAssets.map((a) => {
-          const m = assetMeta[a.symbol];
-          return (
-            <span key={a.symbol} className="ov-glyph" title={`${a.symbol} — ${fmtUSD(a.summary.supplied)}`}>
-              <img
-                src={m?.icon}
-                alt={a.symbol}
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  if (e.currentTarget.parentElement) {
-                    e.currentTarget.parentElement.style.background = m?.color || '#888';
-                  }
-                }}
-              />
-            </span>
-          );
-        })}
+        {topAssets.map((a) => (
+          <AssetGlyph
+            key={a.symbol}
+            symbol={a.symbol}
+            meta={assetMeta}
+            size={22}
+            className="ov-glyph"
+            title={`${a.symbol} — ${fmtUSD(a.summary.supplied)}`}
+          />
+        ))}
         {hub.assets.length > topAssets.length && (
           <span className="ov-glyph-more">+{hub.assets.length - topAssets.length}</span>
         )}

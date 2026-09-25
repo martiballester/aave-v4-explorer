@@ -39,3 +39,14 @@
 .cream .asset-pill .ty{color:rgba(12,37,41,.45)}
 
 ::selection{background:var(--lr-dune);color:var(--bg)}
+
+/* Network switcher (tab bar, right-aligned) */
+.chain-switch{margin-left:auto;align-self:center;display:flex;align-items:center;gap:2px;border:1px solid var(--line);padding:2px;border-radius:3px;overflow-x:auto;max-width:100%}
+.lr-art .chain-opt{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-mute);border-radius:2px;white-space:nowrap}
+.chain-opt:hover:not(.on){color:var(--fg);background:rgba(240,237,229,.06)}
+.chain-opt.on{background:var(--lr-dune);color:var(--bg);font-weight:600}
+.chain-opt.err{color:var(--credit)}
+.chain-err{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:50%;background:var(--credit);color:var(--bg);font-size:9px;font-weight:700}
+.chain-op{font-size:8.5px;letter-spacing:.06em;padding:1px 4px;border:1px solid currentColor;border-radius:2px;opacity:.75}
+.chain-icon{display:inline-flex;flex-shrink:0;border-radius:50%;overflow:hidden}
+.chain-icon img{width:100%;height:100%;display:block;object-fit:cover}

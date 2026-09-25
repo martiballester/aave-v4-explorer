@@ -1,6 +1,6 @@
 # Aave V4 Explorer — LlamaRisk
 
-A static, point-in-time dashboard mapping the Aave V4 hub-and-spoke topology and parameter surface. Built from the design handoff at `../Visulizer/handoff/`. Deploys to GitHub Pages.
+A live dashboard mapping the Aave V4 hub-and-spoke topology and parameter surface across every network V4 runs on (Ethereum, Avalanche, Arc, Base, and the EtherFi white-label on OP Mainnet). Networks are configured in `src/data/chains.ts`; see `MAINTENANCE.md → Adding a network`. Built from the design handoff at `../Visulizer/handoff/`. Deploys to GitHub Pages.
 https://martiballester.github.io/aave-v4-explorer/
 ## Status
 

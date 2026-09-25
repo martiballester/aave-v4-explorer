@@ -1,24 +1,39 @@
-import { createPublicClient, http, fallback } from 'viem';
-import { mainnet } from 'viem/chains';
+import { createPublicClient, defineChain, fallback, http, type PublicClient } from 'viem';
+import type { ChainInfo } from '../chains';
 
-// Public Ethereum mainnet RPCs — no API keys, no signup, browser-CORS-friendly.
-// drpc.org is the primary (rate-limit-friendly, sub-200ms typical). The rest
-// are fallbacks so a single endpoint outage doesn't blank the dashboard.
-const RPCS = [
-  import.meta.env.VITE_RPC_URL as string | undefined,
-  'https://eth.drpc.org',
-  'https://eth.llamarpc.com',
-  'https://eth.merkle.io',
-  'https://rpc.ankr.com/eth',
-].filter((u): u is string => !!u);
+// One viem client per chain, built from the registry's RPC list (public,
+// keyless, browser-CORS-friendly). Multicall3 sits at the same canonical
+// address on every chain V4 is on (checked: Ethereum, Avalanche, Arc, Base,
+// OP), so each client batches its view reads into a handful of eth_calls.
+const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11' as const;
 
-export const publicClient = createPublicClient({
-  chain: mainnet,
-  transport: fallback(
-    RPCS.map((url) => http(url, { batch: { wait: 10 } })),
-    { rank: false, retryCount: 1 },
-  ),
-  // Enable Multicall3 for batched view reads — viem auto-aggregates the calls
-  // inside one `client.multicall(...)` invocation.
-  batch: { multicall: true },
-});
+const clients = new Map<number, PublicClient>();
+
+export function clientFor(chain: ChainInfo): PublicClient | null {
+  const cached = clients.get(chain.chainId);
+  if (cached) return cached;
+
+  // VITE_RPC_URL_<chainId> lets a local build point at a private endpoint.
+  const override = (import.meta.env as Record<string, string | undefined>)[
+    `VITE_RPC_URL_${chain.chainId}`
+  ];
+  const urls = [override, ...chain.rpcUrls].filter((u): u is string => !!u);
+  if (urls.length === 0) return null;
+
+  const client = createPublicClient({
+    chain: defineChain({
+      id: chain.chainId,
+      name: chain.label,
+      nativeCurrency: { name: 'Native', symbol: 'NATIVE', decimals: 18 },
+      rpcUrls: { default: { http: urls } },
+      contracts: { multicall3: { address: MULTICALL3 } },
+    }),
+    transport: fallback(
+      urls.map((url) => http(url, { batch: { wait: 10 } })),
+      { rank: false, retryCount: 1 },
+    ),
+    batch: { multicall: true },
+  });
+  clients.set(chain.chainId, client);
+  return client;
+}

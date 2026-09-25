@@ -1,8 +1,22 @@
 // AaveKit V4 GraphQL queries. Field paths match handoff/QUERIES.md.
+// Every list query takes `$chainIds` — the set comes from the chain registry
+// (chains.ts) merged with the API's own `chains` list.
+
+export const QUERY_CHAINS = /* GraphQL */ `
+  query Chains {
+    chains(request: { query: { filter: MAINNET_ONLY } }) {
+      name
+      chainId
+      icon
+      explorerUrl
+      rpcUrl
+    }
+  }
+`;
 
 export const QUERY_HUBS = /* GraphQL */ `
-  query Hubs {
-    hubs(request: { query: { chainIds: [1] } }) {
+  query Hubs($chainIds: [ChainId!]!) {
+    hubs(request: { query: { chainIds: $chainIds } }) {
       id
       name
       address
@@ -47,6 +61,8 @@ export const QUERY_HUB_ASSETS = /* GraphQL */ `
           symbol
           decimals
           name
+          icon
+          categories
         }
       }
       settings {
@@ -114,8 +130,8 @@ export const QUERY_HUB_ASSETS = /* GraphQL */ `
 `;
 
 export const QUERY_SPOKES = /* GraphQL */ `
-  query Spokes {
-    spokes(request: { query: { chainIds: [1] } }) {
+  query Spokes($chainIds: [ChainId!]!) {
+    spokes(request: { query: { chainIds: $chainIds } }) {
       id
       name
       address
@@ -171,6 +187,8 @@ export const QUERY_RESERVES = /* GraphQL */ `
             symbol
             decimals
             name
+            icon
+            categories
           }
         }
         hub {

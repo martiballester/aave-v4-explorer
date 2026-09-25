@@ -1,5 +1,16 @@
 # Maintenance — what can go stale, and what's safe to ignore
 
+## Adding a network
+
+All networks live in **`src/data/chains.ts`**.
+
+- **AaveKit-indexed network:** nothing to do. The explorer asks AaveKit's `chains` query for every mainnet network on each load and fetches hubs/spokes for all of them. A registry entry is optional polish: a short label, a URL slug (`?chain=<slug>`), browser-CORS RPCs for the oracle multicall, and display order.
+- **White-label / non-indexed deployment** (today: the EtherFi instance on OP Mainnet): add an entry with `source: 'rpc'` and the **hub addresses**. `src/data/rpc/crawl.ts` walks each hub on-chain (assets, connected spokes, reserves, oracle prices, caps, IRM) and emits the same shapes as the AaveKit adapter. Spokes are discovered from the hubs; non-lending spokes (the treasury fee receiver) are skipped automatically. Optional `spokeLabels` gives spokes a display name.
+
+Each network loads independently. If one source fails (AaveKit down, or all of a chain's RPCs down), that network is flagged "failed to load" in the switcher and Overview; the others still render.
+
+Crawled figures use the contract formulas (utilization = totalOwed / addedAssets, borrow APR = drawnRate ray, supply APR = borrow APR × utilization × (1 − liquidityFee), per-second compounding to APY). Checked against AaveKit on Ethereum Core (EURC, frxUSD, GHO): borrow/supply APY and utilization agree to 4 decimals.
+
 The dashboard refreshes on every page load — most data comes from the AaveKit GraphQL API and a public RPC multicall. But a handful of values are baked into the bundle. This doc lists every one of them, classifies the risk, and tells you whether you need to touch it.
 
 **Default stance**: "leave alone" unless something on the live site visibly breaks.
@@ -12,7 +23,8 @@ These are fully data-driven. New hub, new spoke, new asset, new credit line, new
 
 | Field | Source |
 |---|---|
-| Hubs (count, names, addresses, TVL, util) | `hubs` query |
+| Networks | `chains` query (MAINNET_ONLY) merged with `src/data/chains.ts` |
+| Hubs (count, names, addresses, TVL, util) | `hubs` query, all chains in one call |
 | Hub assets (per-asset settings, IRM curve, addCap, drawCap, fees) | `hubAssets` query (per hub) |
 | Spokes (count, names, addresses, totals, liquidation config) | `spokes` query |
 | Reserves (CF, maxLB, liqFee, collateralRisk, status, paused/frozen, caps, APY) | `reserves` query (per spoke) |
@@ -30,11 +42,10 @@ Visual polish for the known cases. New entries fall back gracefully — no icon,
 
 | File | Field | What happens if it drifts |
 |---|---|---|
-| `src/data/editorial.ts` | `HUB_EDITORIAL[*].tag` (`"Risk-adjusted"`, `"Risk-return"`, `"Low risk"`) | Old editorial labels — if the protocol re-tags hubs, our chips show the old phrasing. Cosmetic. |
-| `src/data/editorial.ts` | `HUB_EDITORIAL[*].color` (sand / clay / mint) | Hub-color theme tokens. Visual only. |
-| `src/data/editorial.ts` | `SPOKE_SLUG_BY_ADDRESS` | Pretty slugs for the 10 known spokes. New spokes get `<parentHub>-<name-slugified>` automatically. **Safe to delete entirely** — slugs will just look less polished. |
-| `src/data/editorial.ts` | `SPOKE_TYPE_BY_SLUG` | "e-Mode" / "Specialty" / "General" classifications. New spokes get `inferSpokeTypeFromName()` heuristic ("correlated", "lido", "gold" → matching types). Safe to delete entirely. |
-| `src/data/editorial.ts` | `ASSET_META` (token icons + display names) | New asset symbols not listed here render with generic gray icon. Tokens with their SVG at `app.aave.com/icons/tokens/<symbol>.svg` would work if we add an entry. |
+| `src/data/editorial.ts` | `HUB_EDITORIAL_BY_NAME` (Core / Plus / Prime → tag + color) | Keyed by hub name, so every chain's "Core" shares the Core look. Unknown hubs render grey with their on-chain name. |
+| `src/data/editorial.ts` | `SPOKE_TYPE_BY_NAME` | "e-Mode" / "Specialty" / "General". Unknown spokes fall back to a name heuristic. Safe to delete. |
+| `src/data/editorial.ts` | `ASSET_META` (curated icons) | Optional. Any token without an entry uses the icon AaveKit serves, else a generated logo keyed by chain + address. PTs always take their underlying's icon (`PT-sUSDE-7MAY2026` → sUSDe), credit-line reserves (`cUSDC`) the base token's. |
+| `src/data/chains.ts` | `hubs[].label` for RPC chains | Hubs carry no on-chain name; the OP labels ("EtherFi", "EtherFi II") are editorial. |
 
 **Bottom line on 🟡**: zero maintenance needed. If you want prettier UI for a new token/spoke, add an entry. Otherwise the fallback is acceptable.
 
@@ -46,11 +57,10 @@ These would visibly break the dashboard if upstream changes, but each has fallba
 
 | File | Field | Drift risk | Fix when broken |
 |---|---|---|---|
-| `src/data/editorial.ts` | `HUB_ADDRESS_TO_ID` (3 mainnet hub addresses → id) | If Aave redeploys a hub or adds a new one, the unknown hub gets silently dropped (no `id` mapping). | Add the new address → id. The id can be any lowercase string. |
+| `src/data/chains.ts` | `hubs` for `source: 'rpc'` networks | A new hub on a white-label deployment is not auto-discovered (AaveKit doesn't index it). | Add its address to that network's `hubs`. |
 | `src/data/graphql/queries.ts` | All 5 GraphQL query bodies | AaveKit can change schema (we hit this once: `hubSpokeConfigs` changed argument shape; `ReserveStatus` is an object not enum). Symptoms: data fails to render, console shows GraphQL errors. | Open the [GraphQL playground](https://api.v4.aave.com/graphql) → introspect `__type(name:"X")` → fix the query. |
-| `src/data/rpc/abis.ts` | Spoke + Oracle ABI fragments | If Aave V4 contract signatures change (`ORACLE`, `MAX_USER_RESERVES_LIMIT`, `getReserveSource`), multicall returns `failure` per-call and the UI falls back to placeholders. | Update ABI; check `aave-v4/src/spoke/Spoke.sol` for current selectors. |
-| `src/data/index.ts` | `chainIds: [1]` (Ethereum mainnet only) | V4 is mainnet-only today. If it expands to L2s (Base, Arbitrum, etc.), the dashboard won't pick them up. | Change `chainIds: [1]` → `chainIds: [1, 8453, ...]`. Then the matrix and parameters views auto-include them. |
-| `src/data/index.ts` | `HUB_NAMES = { core, plus, prime }` (display labels) | If a new hub (e.g. "Frontier") gets added, it'll render as `undefined` in the credit-line "from"/"to" badges. | Add `frontier: 'Frontier'`. Or auto-derive from `HUB_EDITORIAL[id].label`. |
+| `src/data/rpc/abis.ts` | Hub / Spoke / Oracle / IR-strategy ABI fragments | If V4 view signatures change, oracle multicalls fall back to placeholders, and the OP crawler fails (flagged in the UI). | Update ABI; check `aave-v4/src/hub/interfaces/IHub.sol`, `src/spoke/interfaces/ISpoke.sol`. |
+| `src/data/chains.ts` | `rpcUrls` per network | Public RPCs come and go. All endpoints for a chain down → oracle fields show placeholders (AaveKit chains) or the network is flagged failed (RPC chains). | Swap in another CORS-enabled public RPC. `VITE_RPC_URL_<chainId>` overrides locally. |
 
 ---
 
@@ -112,10 +122,14 @@ def gql(q, v=None):
     if r.get('errors'): print(f'  ❌ {r["errors"][0]["message"][:120]}'); return None
     return r['data']
 
-hubs = gql('query{hubs(request:{query:{chainIds:[1]}}){id name address}}')
+chains = gql('query{chains(request:{query:{filter:MAINNET_ONLY}}){chainId name}}')
+ids = [c['chainId'] for c in chains['chains']] if chains else [1]
+print(f'chains: {ids}')
+
+hubs = gql('query($c:[ChainId!]!){hubs(request:{query:{chainIds:$c}}){id name address}}', {'c': ids})
 print(f'hubs: {len(hubs["hubs"]) if hubs else "FAIL"}')
 
-spokes = gql('query{spokes(request:{query:{chainIds:[1]}}){id name connectedHubs{hub{address}}}}')
+spokes = gql('query($c:[ChainId!]!){spokes(request:{query:{chainIds:$c}}){id name connectedHubs{hub{address}}}}', {'c': ids})
 print(f'spokes: {len(spokes["spokes"]) if spokes else "FAIL"}')
 
 if hubs and spokes:

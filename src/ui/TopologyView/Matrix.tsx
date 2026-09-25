@@ -1,6 +1,8 @@
 import { Fragment, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useTopology } from '../../data';
+import { useChainScope, useScopedParams, useTopology } from '../../data';
 import type { HubId, HubSpokeRef } from '../../data/types';
+import { AssetGlyph } from '../AssetGlyph';
+import { ChainIcon } from '../ChainSwitcher';
 
 type CellState = 'col' | 'bor' | 'both' | null;
 type SpokeWithHub = HubSpokeRef & { hub: HubId; hubLabel: string; hubColor: string };
@@ -14,6 +16,13 @@ interface HoverState {
 
 export function Matrix() {
   const { hubs: hubsM, creditLines: creditLinesM, assetMeta: assetMetaM, HUB_NAMES: HUB_NAMES_M } = useTopology();
+  const { data: scoped } = useScopedParams();
+  const { scope } = useChainScope();
+  // With every network in view, hubs carry their chain icon (several chains
+  // run a hub called "Core").
+  const chainIconOf = (chainId: number) =>
+    scope === 'all' ? scoped?.chains.find((c) => c.chainId === chainId)?.icon : undefined;
+  const spokeLabelOf = (id: string) => scoped?.getSpoke(id)?.name ?? id;
 
   const [hover, setHover] = useState<HoverState | null>(null);
   const [filter, setFilter] = useState<'all' | HubId>('all');
@@ -184,6 +193,7 @@ export function Matrix() {
               }}
             >
               <span className="mx-dot" style={{ background: h.color }} />
+              {chainIconOf(h.chainId) && <ChainIcon src={chainIconOf(h.chainId)} size={11} />}
               {h.label}
             </button>
           ))}
@@ -248,7 +258,6 @@ export function Matrix() {
 
           <div className="mx-col-head-row">
             {assetCols.map((asset, i) => {
-              const m = assetMetaM[asset] || ({} as { icon?: string; color?: string });
               const boundary = groupBoundaries.find((g) => g.i === i);
               const hl = colHL(asset);
               return (
@@ -258,18 +267,7 @@ export function Matrix() {
                   onMouseEnter={() => setHover((h) => ({ ...(h ?? {}), asset }))}
                   onMouseLeave={() => setHover((h) => (h?.asset === asset ? null : h))}
                 >
-                  <span className="mx-col-asset-icon">
-                    <img
-                      src={m.icon}
-                      alt=""
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        if (e.currentTarget.parentElement) {
-                          e.currentTarget.parentElement.style.background = m.color || '#888';
-                        }
-                      }}
-                    />
-                  </span>
+                  <AssetGlyph symbol={asset} meta={assetMetaM} size={18} className="mx-col-asset-icon" />
                   <span className="mx-col-label">{asset}</span>
                 </div>
               );
@@ -300,8 +298,9 @@ export function Matrix() {
                     <path d="M9 6l8 6-8 6V6z" />
                   </svg>
                   <span className="mx-hub-bullet" style={{ background: hub.color }} />
+                  {chainIconOf(hub.chainId) && <ChainIcon src={chainIconOf(hub.chainId)} size={13} />}
                   <span className="mx-hub-band-name">{hub.label}</span>
-                  <span className="lr-eyebrow">{hub.tag}</span>
+                  {hub.tag !== '—' && <span className="lr-eyebrow">{hub.tag}</span>}
                   <span className="mx-hub-band-meta">
                     {hub.spokes.length} spoke{hub.spokes.length > 1 ? 's' : ''}
                     {isCollapsed && ' · collapsed'}
@@ -389,7 +388,7 @@ export function Matrix() {
                           {HUB_NAMES_M[cl.from]}
                         </span>
                         <span className="mx-credit-sep">credit in →</span>
-                        <span className="mx-credit-to">{cl.toSpoke.replace(cl.to + '-', '')}</span>
+                        <span className="mx-credit-to">{spokeLabelOf(cl.toSpoke)}</span>
                         <span className="mx-credit-assets">
                           {cl.assets.map((a) => (
                             <span key={a} className="mx-credit-chip">

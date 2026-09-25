@@ -1,13 +1,16 @@
-import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { useAaveParams, useTopology } from '../../data';
+import { Fragment, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useScopedParams, useTopology } from '../../data';
 import type {
   AaveParams,
+  AssetMetadata,
   CreditLine,
   Hub,
   HubId,
   Reserve,
   Spoke,
 } from '../../data/types';
+import { AssetGlyph } from '../AssetGlyph';
+import { ChainIcon } from '../ChainSwitcher';
 
 export type Selected =
   | { kind: 'hub'; id: HubId }
@@ -15,7 +18,7 @@ export type Selected =
   | { kind: 'reserve'; spokeId: string; symbol: string };
 
 export function ParamsExplorer({ initialSelection }: { initialSelection?: Selected } = {}) {
-  const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useAaveParams();
+  const { data, isLoading, isFetching, error, dataUpdatedAt, refetch } = useScopedParams();
   const topology = useTopology();
 
   if (isLoading || !data) {
@@ -31,7 +34,7 @@ export function ParamsExplorer({ initialSelection }: { initialSelection?: Select
     <ParamsExplorerInner
       data={data}
       hubNames={topology.HUB_NAMES}
-      assetMeta={topology.assetMeta}
+      assetMeta={data.assetMeta}
       dataUpdatedAt={dataUpdatedAt}
       isFetching={isFetching}
       onRefresh={() => refetch()}
@@ -43,7 +46,7 @@ export function ParamsExplorer({ initialSelection }: { initialSelection?: Select
 interface InnerProps {
   data: AaveParams;
   hubNames: Record<HubId, string>;
-  assetMeta: ReturnType<typeof useTopology>['assetMeta'];
+  assetMeta: AssetMeta;
   dataUpdatedAt: number;
   isFetching: boolean;
   onRefresh: () => void;
@@ -62,8 +65,26 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
   const P_META = assetMeta;
 
   const [selected, setSelected] = useState<Selected>(
-    initialSelection ?? { kind: 'hub', id: P_HUBS[0]?.id ?? 'core' },
+    initialSelection ?? { kind: 'hub', id: P_HUBS[0]?.id ?? '' },
   );
+  // Group the tree by network only when more than one is in scope.
+  const chainGroups = useMemo(() => {
+    const groups: Array<{ chainId: number; label: string; icon: string; hubs: Hub[] }> = [];
+    for (const h of P_HUBS) {
+      let g = groups.find((x) => x.chainId === h.chain.chainId);
+      if (!g) {
+        g = { chainId: h.chain.chainId, label: h.chain.name, icon: h.chain.icon, hubs: [] };
+        groups.push(g);
+      }
+      g.hubs.push(h);
+    }
+    return groups;
+  }, [P_HUBS]);
+  const showChainHeaders = chainGroups.length > 1;
+  const selHub = selected.kind === 'hub' ? P_API.getHub(selected.id) : undefined;
+  const selSpoke = selected.kind !== 'hub' ? P_API.getSpoke(selected.kind === 'spoke' ? selected.id : selected.spokeId) : undefined;
+  const selReserve =
+    selected.kind === 'reserve' ? P_API.getReserve(selected.spokeId, selected.symbol) : undefined;
   const [openHubs, setOpenHubs] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(P_HUBS.map((h) => [h.id, true])),
   );
@@ -98,7 +119,15 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
         </div>
 
         <nav className="pp-tree">
-          {P_HUBS.map((hub) => {
+          {chainGroups.map((group) => (
+          <Fragment key={group.chainId}>
+          {showChainHeaders && (!query || group.hubs.some((h) => matches(h.label) || P_SPOKES.some((sp) => sp.hubId === h.id && (matches(sp.name) || sp.reserves.some((r) => matches(r.symbol)))))) && (
+            <div className="pp-chain-head">
+              <ChainIcon src={group.icon} size={13} />
+              <span>{group.label}</span>
+            </div>
+          )}
+          {group.hubs.map((hub) => {
             const open = openHubs[hub.id];
             const hubSpokes = P_SPOKES.filter((s) => s.hubId === hub.id);
             const hubMatches =
@@ -170,6 +199,8 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
               </div>
             );
           })}
+          </Fragment>
+          ))}
         </nav>
 
         <div className="pp-side-foot">
@@ -205,9 +236,12 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
       </aside>
 
       <section className="pp-main">
-        {selected.kind === 'hub' && (
+        {!selHub && !selSpoke && (
+          <div className="pp-detail pp-mute">Select a hub, spoke or reserve.</div>
+        )}
+        {selected.kind === 'hub' && selHub && (
           <HubDetail
-            hub={P_API.getHub(selected.id)!}
+            hub={selHub}
             spokes={P_SPOKES}
             creditLines={P_CL}
             helpers={P_H}
@@ -216,19 +250,19 @@ function ParamsExplorerInner({ data, hubNames, assetMeta, dataUpdatedAt, isFetch
             onSelect={setSelected}
           />
         )}
-        {selected.kind === 'spoke' && (
+        {selected.kind === 'spoke' && selSpoke && (
           <SpokeDetail
-            spoke={P_API.getSpoke(selected.id)!}
+            spoke={selSpoke}
             api={P_API}
             meta={P_META}
             onSelect={setSelected}
             hubNames={P_HUB_NAMES}
           />
         )}
-        {selected.kind === 'reserve' && (
+        {selected.kind === 'reserve' && selSpoke && selReserve && (
           <ReserveDetail
-            reserve={P_API.getReserve(selected.spokeId, selected.symbol)!}
-            spoke={P_API.getSpoke(selected.spokeId)!}
+            reserve={selReserve}
+            spoke={selSpoke}
             api={P_API}
             helpers={P_H}
             meta={P_META}
@@ -258,31 +292,7 @@ function Caret({ open }: { open: boolean }) {
   );
 }
 
-type AssetMeta = ReturnType<typeof useTopology>['assetMeta'];
-
-function AssetGlyph({ symbol, size = 18, meta }: { symbol: string; size?: number; meta: AssetMeta }) {
-  const m = meta[symbol] || ({} as { icon?: string; type?: string; color?: string });
-  const isCredit = m.type === 'credit';
-  const isPt = m.type === 'pt';
-  return (
-    <span
-      className={'pp-glyph ' + (isCredit ? 'credit ' : '') + (isPt ? 'pt ' : '')}
-      style={{ width: size, height: size }}
-    >
-      <img
-        src={m.icon}
-        alt=""
-        loading="lazy"
-        onError={(e) => {
-          e.currentTarget.style.display = 'none';
-          if (e.currentTarget.parentElement) {
-            e.currentTarget.parentElement.style.background = m.color || '#888';
-          }
-        }}
-      />
-    </span>
-  );
-}
+type AssetMeta = Record<string, AssetMetadata>;
 
 function ReserveFlags({ reserve: r, compact }: { reserve: Reserve; compact?: boolean }) {
   const flags: Array<{ k: string; t: string; cls: string }> = [];
@@ -366,6 +376,11 @@ const fmtUSD = (n: number | null | undefined, d = 2): string => {
 };
 const fmtPct = (n: number | null | undefined, d = 2): string =>
   n == null ? '—' : (n * 100).toFixed(d) + '%';
+// Health factors: at least 2 decimals, up to 3 when they matter (1.019).
+const fmtHf = (n: number): string => {
+  const s = n.toFixed(3);
+  return s.endsWith('0') ? n.toFixed(2) : s;
+};
 const fmtBps = (n: number | null | undefined): string =>
   n == null ? '—' : (n * 10000).toFixed(0) + ' BPS';
 
@@ -463,6 +478,8 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
         <div className="pp-crumb">
           <span>Aave V4</span>
           <span className="sep">/</span>
+          <span>{hub.chain.name}</span>
+          <span className="sep">/</span>
           <span>Hub</span>
         </div>
         <div className="pp-title-row">
@@ -474,7 +491,10 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
             <ShortAddr addr={hub.address} />
           </KV>
           <KV k="Chain">
-            {hub.chain.name} · {hub.chain.chainId}
+            <span className="pp-chain-kv">
+              <ChainIcon src={hub.chain.icon} size={12} />
+              {hub.chain.name} · {hub.chain.chainId}
+            </span>
           </KV>
           <KV k="GraphQL ID">
             <code className="pp-id-tag">{hub.gqlId.slice(0, 12)}…</code>
@@ -599,10 +619,10 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
         <Section title="Credit lines" hint="Assets a spoke can borrow from a hub other than its parent — cross-hub credit flows">
           <div className="pp-cl-list">
             {inCl.map((cl, i) => (
-              <CreditRow key={'i' + i} cl={cl} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
+              <CreditRow key={'i' + i} cl={cl} spokeName={P_SPOKES.find((s) => s.id === cl.toSpoke)?.name ?? cl.toSpoke} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
             ))}
             {outCl.map((cl, i) => (
-              <CreditRow key={'o' + i} cl={cl} direction="out" hubNames={hubNames} meta={meta} onSelect={onSelect} />
+              <CreditRow key={'o' + i} cl={cl} spokeName={P_SPOKES.find((s) => s.id === cl.toSpoke)?.name ?? cl.toSpoke} direction="out" hubNames={hubNames} meta={meta} onSelect={onSelect} />
             ))}
           </div>
         </Section>
@@ -613,12 +633,13 @@ function HubDetail({ hub, spokes: P_SPOKES, creditLines: P_CL, helpers, meta, hu
 
 interface CreditRowProps {
   cl: CreditLine;
+  spokeName: string;
   direction: 'in' | 'out';
   hubNames: Record<HubId, string>;
   meta: AssetMeta;
   onSelect: (s: Selected) => void;
 }
-function CreditRow({ cl, direction, hubNames, meta, onSelect }: CreditRowProps) {
+function CreditRow({ cl, spokeName, direction, hubNames, meta, onSelect }: CreditRowProps) {
   const [open, setOpen] = useState(false);
   const totalDrawCap = cl.assets.reduce((s, a) => s + (cl.capByAsset[a]?.drawCap || 0), 0);
   return (
@@ -637,7 +658,7 @@ function CreditRow({ cl, direction, hubNames, meta, onSelect }: CreditRowProps) 
             }}
             className="pp-cl-spoke"
           >
-            {cl.toSpoke.replace(cl.to + '-', '')}
+            {spokeName}
           </span>
         </span>
         <span className="pp-cl-chips">
@@ -660,7 +681,7 @@ function CreditRow({ cl, direction, hubNames, meta, onSelect }: CreditRowProps) 
                 {fmtPct(cl.riskPremiumThreshold, 0)}
                 {cl.riskPremiumThreshold === 0 && (
                   <span className="pp-mute" style={{ marginLeft: 6, fontSize: 10 }}>
-                    (inactive)
+                    (premium-free debt only)
                   </span>
                 )}
               </b>
@@ -671,8 +692,9 @@ function CreditRow({ cl, direction, hubNames, meta, onSelect }: CreditRowProps) 
               {cl.riskPremiumThreshold === 0 && (
                 <>
                   {' '}
-                  Currently 0 across mainnet — V4&apos;s risk-premium mechanism isn&apos;t being charged
-                  yet (collateralRisk = 0 BPS on all reserves).
+                  At 0, any change that would leave the spoke holding premium debt on this line
+                  reverts; premium only accrues on positions backed by collateral with a
+                  collateral risk above 0 BPS.
                 </>
               )}
             </span>
@@ -775,6 +797,8 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
         <div className="pp-crumb">
           <span>Aave V4</span>
           <span className="sep">/</span>
+          <span>{hub.chain.name}</span>
+          <span className="sep">/</span>
           <button
             className="pp-crumb-link"
             onClick={() => onSelect({ kind: 'hub', id: hub.id })}
@@ -816,23 +840,23 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
 
       <Section
         title="Liquidation engine"
-        hint="Dutch-auction profile that applies to every reserve in this spoke (replaces V3's fixed close factor and bonus)"
+        hint="Dutch-auction profile shared by every reserve in this spoke (replaces V3's fixed close factor and bonus). The bonus a liquidator earns grows as the position's health factor falls, from the minimum just below HF 1 to the reserve's max bonus at the saturation HF."
       >
         <div className="pp-liq">
           <div className="pp-liq-params">
-            <Stat n={spoke.liquidationConfig.targetHF.toFixed(2)} k="Target HF" sub="post-liquidation" />
+            <Stat n={fmtHf(spoke.liquidationConfig.targetHF)} k="Target HF" sub="restored after liquidation" />
             <Stat
-              n={spoke.liquidationConfig.hfForMaxBonus.toFixed(2)}
+              n={fmtHf(spoke.liquidationConfig.hfForMaxBonus)}
               k="HF @ max bonus"
-              sub="auction saturates"
+              sub="bonus saturates at or below"
             />
             <Stat
               n={fmtPct(spoke.liquidationConfig.liqBonusFactor, 0)}
               k="Min-bonus factor"
-              sub="× (maxLB − 100%)"
+              sub="min bonus = factor × max bonus"
             />
           </div>
-          <DutchAuction config={spoke.liquidationConfig} />
+          <LiquidationBonusChart spoke={spoke} meta={meta} />
         </div>
       </Section>
 
@@ -862,7 +886,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
                 </div>
               </div>
               <div className="r pp-mono">{fmtPct(r.collateralFactor, 0)}</div>
-              <div className="r pp-mono">{fmtPct(r.maxLiquidationBonus, 1)}</div>
+              <div className="r pp-mono">{fmtPct(r.maxLiquidationBonus, 2)}</div>
               <div className="r pp-mono">{fmtPct(r.liquidationFee, 0)}</div>
               <div className="r pp-mono">{fmtBps(r.collateralRisk)}</div>
               <div className="r">
@@ -891,7 +915,7 @@ function SpokeDetail({ spoke, api, meta, onSelect, hubNames }: SpokeDetailProps)
         <Section title="Incoming credit lines" hint="Credit this spoke can draw from other hubs">
           <div className="pp-cl-list">
             {credits.map((cl, i) => (
-              <CreditRow key={i} cl={cl} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
+              <CreditRow key={i} cl={cl} spokeName={spoke.name} direction="in" hubNames={hubNames} meta={meta} onSelect={onSelect} />
             ))}
           </div>
         </Section>
@@ -913,12 +937,17 @@ interface ReserveDetailProps {
 }
 function ReserveDetail({ reserve: r, spoke, api, helpers, meta, onSelect }: ReserveDetailProps) {
   const hub = api.getHub(spoke.hubId)!;
-  const hubAsset = hub.assets.find((a) => a.symbol === r.symbol);
+  // The asset's own hub (differs from the spoke's parent for credit lines).
+  const hubAsset = api
+    .getHub(r.hub)
+    ?.assets.find((a) => a.underlying.toLowerCase() === r.underlying.toLowerCase());
   return (
     <div className="pp-detail">
       <header className="pp-detail-head">
         <div className="pp-crumb">
           <span>Aave V4</span>
+          <span className="sep">/</span>
+          <span>{hub.chain.name}</span>
           <span className="sep">/</span>
           <button
             className="pp-crumb-link"
@@ -1213,75 +1242,313 @@ function IrmCurve({
   );
 }
 
-function DutchAuction({ config }: { config: Spoke['liquidationConfig'] }) {
-  const maxLB = 0.08;
-  const minLB = maxLB * config.liqBonusFactor;
-  const W = 380;
-  const H = 130;
-  const padL = 32;
-  const padR = 8;
-  const padT = 8;
-  const padB = 24;
+// ---------------------------------------------------------------------------
+// Liquidation bonus vs health factor
+//
+// V4 (LiquidationLogic.calculateLiquidationBonus), per reserve:
+//   HF ≤ hfForMaxBonus          → bonus = maxBonus
+//   hfForMaxBonus < HF < 1      → linear from maxBonus down to
+//                                 minBonus = maxBonus × liquidationBonusFactor
+//   HF ≥ 1                      → not liquidatable
+// The shape is spoke-wide; the level is per reserve (its max bonus), so the
+// chart draws one line per distinct max-bonus tier among collateral reserves.
+// ---------------------------------------------------------------------------
+
+// Ordinal ramp (one hue, darker → lighter = smaller → larger bonus), checked
+// with the dataviz validator against the chart surface #0A1F23: monotone
+// lightness, adjacent ΔL ≥ 0.06, dark end 2.34:1 contrast. Fewer tiers take
+// evenly spaced steps, so their gaps only get wider.
+const LB_RAMP = ['#7A4A40', '#915A4F', '#A96C5E', '#C27D6E', '#D49385', '#E6A99B', '#F8BFB3'];
+const LB_MAX_TIERS = LB_RAMP.length;
+const rampColors = (n: number) =>
+  n === 1
+    ? [LB_RAMP[3]]
+    : Array.from({ length: n }, (_, i) => LB_RAMP[Math.round((i * (LB_RAMP.length - 1)) / (n - 1))]);
+
+function bonusAt(hf: number, maxBonus: number, cfg: Spoke['liquidationConfig']): number | null {
+  if (hf >= 1) return null;
+  if (hf <= cfg.hfForMaxBonus) return maxBonus;
+  const minBonus = maxBonus * cfg.liqBonusFactor;
+  return minBonus + ((maxBonus - minBonus) * (1 - hf)) / (1 - cfg.hfForMaxBonus);
+}
+
+function niceStep(max: number): number {
+  for (const s of [0.0025, 0.005, 0.01, 0.02, 0.05, 0.1]) if (max / s <= 6) return s;
+  return 0.2;
+}
+
+function LiquidationBonusChart({ spoke, meta }: { spoke: Spoke; meta: AssetMeta }) {
+  const cfg = spoke.liquidationConfig;
+  const [hoverHf, setHoverHf] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const allTiers = useMemo(() => {
+    const byBonus = new Map<string, { maxBonus: number; symbols: string[]; supplied: number }>();
+    for (const r of spoke.reserves) {
+      if (!r.collateral || r.maxLiquidationBonus <= 0) continue;
+      const k = r.maxLiquidationBonus.toFixed(6);
+      const t = byBonus.get(k) ?? { maxBonus: r.maxLiquidationBonus, symbols: [], supplied: 0 };
+      t.symbols.push(r.symbol);
+      t.supplied += r.suppliedAmount;
+      byBonus.set(k, t);
+    }
+    return [...byBonus.values()].sort((a, b) => a.maxBonus - b.maxBonus);
+  }, [spoke.reserves]);
+
+  if (allTiers.length === 0) {
+    return (
+      <div className="pp-lb-empty">
+        No reserve on this spoke is enabled as collateral, so there is nothing to liquidate.
+      </div>
+    );
+  }
+
+  // Past seven tiers, keep the seven carrying the most collateral; the
+  // reserves table below lists every reserve's max bonus.
+  const tiers =
+    allTiers.length <= LB_MAX_TIERS
+      ? allTiers
+      : [...allTiers]
+          .sort((a, b) => b.supplied - a.supplied)
+          .slice(0, LB_MAX_TIERS)
+          .sort((a, b) => a.maxBonus - b.maxBonus);
+  const colors = rampColors(tiers.length);
+  const flat = cfg.liqBonusFactor >= 0.9999;
+
+  // Geometry (viewBox units; the SVG scales to its container width).
+  const W = 640;
+  const H = 240;
+  const padL = 48;
+  const padR = 20;
+  const padT = 30;
+  const padB = 40;
   const cw = W - padL - padR;
   const ch = H - padT - padB;
-  const xScale = (hf: number) => padL + ((1.0 - hf) / (1.0 - config.hfForMaxBonus + 0.05)) * cw;
-  const yScale = (lb: number) => padT + ch - (lb / maxLB) * ch;
-  const xs: Array<{ hf: number; lb: number }> = [];
-  for (let i = 0; i <= 80; i++) {
-    const hf = 1.0 - (i / 80) * (1.0 - config.hfForMaxBonus + 0.05);
-    let lb: number;
-    if (hf >= 1.0) lb = 0;
-    else if (hf <= config.hfForMaxBonus) lb = maxLB;
-    else lb = minLB + (maxLB - minLB) * (1.0 - hf) / (1.0 - config.hfForMaxBonus);
-    xs.push({ hf, lb });
-  }
-  const d = xs.map((p, i) => (i === 0 ? 'M' : 'L') + xScale(p.hf).toFixed(1) + ',' + yScale(p.lb).toFixed(1)).join(' ');
+
+  const hfMax = cfg.hfForMaxBonus;
+  const span = Math.max(1 - hfMax, 0.001);
+  const lo = hfMax - span * 0.45;
+  const hi = 1 + span * 0.45;
+  const x = (hf: number) => padL + ((hf - lo) / (hi - lo)) * cw;
+
+  const topTier = tiers[tiers.length - 1].maxBonus;
+  const step = niceStep(topTier * 1.15);
+  const yMax = Math.ceil((topTier * 1.15) / step) * step;
+  const y = (b: number) => padT + ch - (b / yMax) * ch;
+  const yTicks = Array.from({ length: Math.round(yMax / step) + 1 }, (_, i) => i * step);
+  // Enough decimals that every tick prints exactly (0.25% steps → 2).
+  const yDigits = (String(Math.round(step * 1e6) / 1e4).split('.')[1] ?? '').length;
+
+  const mid = (hfMax + 1) / 2;
+  const xDigits = Math.max(2, (mid.toString().split('.')[1] ?? '').replace(/0+$/, '').length);
+  const xTicks = [hfMax, mid, 1];
+
+  const tierPath = (maxBonus: number) => {
+    const minBonus = maxBonus * cfg.liqBonusFactor;
+    return `M${x(lo)},${y(maxBonus)} L${x(hfMax)},${y(maxBonus)} L${x(1)},${y(minBonus)}`;
+  };
+
+  const hfFromPointer = (clientX: number) => {
+    const el = svgRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * W;
+    const hf = lo + ((px - padL) / cw) * (hi - lo);
+    return Math.min(hi, Math.max(lo, hf));
+  };
+  const keyStep = (hi - lo) / 60;
+
+  const hoverX = hoverHf != null ? x(hoverHf) : null;
+  const tipLeftPct = hoverX != null ? (hoverX / W) * 100 : 0;
+  const zone =
+    hoverHf == null
+      ? ''
+      : hoverHf >= 1
+        ? 'Not liquidatable'
+        : hoverHf <= hfMax
+          ? 'Max bonus'
+          : flat
+            ? 'Full bonus'
+            : 'Bonus ramp';
+
   return (
-    <svg className="pp-dutch" width="100%" viewBox={`0 0 ${W} ${H}`}>
-      <line x1={padL} y1={padT + ch} x2={padL + cw} y2={padT + ch} stroke="var(--line)" strokeWidth="0.5" />
-      <line
-        x1={xScale(1.0)}
-        x2={xScale(1.0)}
-        y1={padT}
-        y2={padT + ch}
-        stroke="var(--fg-mute)"
-        strokeWidth="0.75"
-        strokeDasharray="2 3"
-      />
-      <text x={xScale(1.0) + 4} y={padT + 10} fill="var(--fg-mute)" fontFamily="var(--font-mono)" fontSize="9">
-        HF=1.00
-      </text>
-      <line
-        x1={xScale(config.hfForMaxBonus)}
-        x2={xScale(config.hfForMaxBonus)}
-        y1={padT}
-        y2={padT + ch}
-        stroke="#6FB7AE"
-        strokeWidth="0.75"
-        strokeDasharray="2 3"
-      />
-      <text
-        x={xScale(config.hfForMaxBonus) + 4}
-        y={padT + 22}
-        fill="#6FB7AE"
-        fontFamily="var(--font-mono)"
-        fontSize="9"
+    <div className="pp-lb">
+      <div
+        className="pp-lb-plot"
+        tabIndex={0}
+        aria-label={`Liquidation bonus by health factor for ${spoke.name}. Use arrow keys to move along the health factor axis.`}
+        onFocus={() => setHoverHf((h) => h ?? mid)}
+        onBlur={() => setHoverHf(null)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            const d = e.key === 'ArrowLeft' ? -keyStep : keyStep;
+            setHoverHf((h) => Math.min(hi, Math.max(lo, (h ?? mid) + d)));
+          }
+        }}
       >
-        HF={config.hfForMaxBonus.toFixed(2)}
-      </text>
-      <path d={d} fill="none" stroke="var(--credit)" strokeWidth="2" />
-      <text x={padL - 6} y={yScale(maxLB) + 3} textAnchor="end" fill="var(--fg-mute)" fontFamily="var(--font-mono)" fontSize="9">
-        {(maxLB * 100).toFixed(0)}%
-      </text>
-      <text x={padL - 6} y={yScale(minLB) + 3} textAnchor="end" fill="var(--fg-mute)" fontFamily="var(--font-mono)" fontSize="9">
-        {(minLB * 100).toFixed(1)}%
-      </text>
-      <text x={padL - 6} y={yScale(0) + 3} textAnchor="end" fill="var(--fg-mute)" fontFamily="var(--font-mono)" fontSize="9">
-        0%
-      </text>
-      <text x={W / 2} y={H - 4} textAnchor="middle" fill="var(--fg-mute)" fontFamily="var(--font-mono)" fontSize="9">
-        Health factor (right → left = unhealthier)
-      </text>
-    </svg>
+        <svg
+          ref={svgRef}
+          className="pp-lb-svg"
+          width="100%"
+          viewBox={`0 0 ${W} ${H}`}
+          onPointerMove={(e) => setHoverHf(hfFromPointer(e.clientX))}
+          onPointerLeave={() => setHoverHf(null)}
+        >
+          {/* HF ≥ 1: no liquidation possible */}
+          <rect x={x(1)} y={padT} width={x(hi) - x(1)} height={ch} fill="var(--fg)" opacity="0.035" />
+
+          {/* Gridlines + y ticks */}
+          {yTicks.map((t) => (
+            <g key={t}>
+              <line x1={padL} x2={padL + cw} y1={y(t)} y2={y(t)} stroke="var(--line-soft)" strokeWidth="1" />
+              <text x={padL - 8} y={y(t) + 3} textAnchor="end" className="pp-lb-tick">
+                {(t * 100).toFixed(yDigits)}%
+              </text>
+            </g>
+          ))}
+          <line x1={padL} x2={padL + cw} y1={y(0)} y2={y(0)} stroke="var(--line)" strokeWidth="1" />
+
+          {/* Zone labels */}
+          <text x={(x(lo) + x(hfMax)) / 2} y={padT - 12} textAnchor="middle" className="pp-lb-zone">
+            max bonus
+          </text>
+          <text x={(x(hfMax) + x(1)) / 2} y={padT - 12} textAnchor="middle" className="pp-lb-zone">
+            {flat ? 'full bonus' : 'bonus ramp'}
+          </text>
+          <text x={(x(1) + x(hi)) / 2} y={padT - 12} textAnchor="middle" className="pp-lb-zone">
+            not liquidatable
+          </text>
+
+          {/* Threshold markers */}
+          {[hfMax, 1].map((t) => (
+            <line
+              key={t}
+              x1={x(t)}
+              x2={x(t)}
+              y1={padT - 4}
+              y2={padT + ch}
+              stroke="var(--fg-mute)"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+            />
+          ))}
+
+          {/* One line per max-bonus tier */}
+          {tiers.map((t, i) => (
+            <g key={t.maxBonus}>
+              <path
+                d={tierPath(t.maxBonus)}
+                fill="none"
+                stroke={colors[i]}
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+              <circle
+                cx={x(1)}
+                cy={y(t.maxBonus * cfg.liqBonusFactor)}
+                r="4"
+                fill={colors[i]}
+                stroke="var(--pp-lb-surface)"
+                strokeWidth="2"
+              />
+            </g>
+          ))}
+
+          {/* X axis */}
+          {xTicks.map((t) => (
+            <text key={t} x={x(t)} y={padT + ch + 16} textAnchor="middle" className="pp-lb-tick">
+              {t.toFixed(xDigits)}
+            </text>
+          ))}
+          <text x={padL + cw / 2} y={H - 6} textAnchor="middle" className="pp-lb-axis">
+            Health factor
+          </text>
+
+          {/* Crosshair */}
+          {hoverHf != null && hoverX != null && (
+            <g pointerEvents="none">
+              <line x1={hoverX} x2={hoverX} y1={padT} y2={padT + ch} stroke="var(--fg-soft)" strokeWidth="1" />
+              {tiers.map((t, i) => {
+                const b = bonusAt(hoverHf, t.maxBonus, cfg);
+                return b == null ? null : (
+                  <circle
+                    key={t.maxBonus}
+                    cx={hoverX}
+                    cy={y(b)}
+                    r="4"
+                    fill={colors[i]}
+                    stroke="var(--pp-lb-surface)"
+                    strokeWidth="2"
+                  />
+                );
+              })}
+            </g>
+          )}
+        </svg>
+
+        {hoverHf != null && (
+          <div
+            className={'pp-lb-tip ' + (tipLeftPct > 60 ? 'flip' : '')}
+            style={{ left: tipLeftPct + '%' }}
+            role="status"
+          >
+            <div className="pp-lb-tip-h">
+              <b className="pp-mono">HF {hoverHf.toFixed(xDigits + 1)}</b>
+              <span>{zone}</span>
+            </div>
+            {hoverHf >= 1 ? (
+              <div className="pp-lb-tip-note">Health factor at or above 1: no bonus is paid.</div>
+            ) : (
+              [...tiers].reverse().map((t) => {
+                const i = tiers.indexOf(t);
+                return (
+                  <div key={t.maxBonus} className="pp-lb-tip-row">
+                    <span className="pp-lb-key" style={{ background: colors[i] }} />
+                    <b className="pp-mono">{fmtPct(bonusAt(hoverHf, t.maxBonus, cfg), 2)}</b>
+                    <span className="pp-lb-tip-syms">
+                      {t.symbols.slice(0, 3).join(', ')}
+                      {t.symbols.length > 3 ? ` +${t.symbols.length - 3}` : ''}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="pp-lb-legend">
+        {[...tiers].reverse().map((t) => {
+          const i = tiers.indexOf(t);
+          return (
+            <div key={t.maxBonus} className="pp-lb-leg-row">
+              <span className="pp-lb-key" style={{ background: colors[i] }} />
+              <span className="pp-lb-leg-v pp-mono">
+                {fmtPct(t.maxBonus, 2)}
+                {!flat && (
+                  <span className="pp-mute"> → {fmtPct(t.maxBonus * cfg.liqBonusFactor, 2)} at HF 1</span>
+                )}
+              </span>
+              <span className="pp-lb-leg-assets">
+                {t.symbols.map((sym) => (
+                  <span key={sym} className="pp-lb-leg-asset">
+                    <AssetGlyph symbol={sym} size={14} meta={meta} />
+                    {sym}
+                  </span>
+                ))}
+              </span>
+            </div>
+          );
+        })}
+        {allTiers.length > tiers.length && (
+          <div className="pp-lb-leg-note">
+            Showing the {LB_MAX_TIERS} of {allTiers.length} bonus tiers with the most collateral supplied.
+            Every reserve's max bonus is in the table below.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

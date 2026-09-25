@@ -1,9 +1,15 @@
-// Merge AaveKit GraphQL responses + editorial overrides into the AaveParams
-// shape the UI consumes (DATA-CONTRACT.md). The UI never sees raw GraphQL.
+// Merge AaveKit GraphQL responses (and RPC-crawled chains, emitted in the same
+// shapes) + editorial overrides into the AaveParams shape the UI consumes
+// (DATA-CONTRACT.md). The UI never sees raw GraphQL.
+//
+// Everything is chain-scoped: hubs are resolved by (chainId, address), since
+// V4 contracts can share an address across chains and several chains run a
+// hub called "Core" with a spoke called "Main".
 
 import type {
   AaveParams,
-  Address,
+  AssetMetadata,
+  ChainSummary,
   CreditLine,
   CurvePoint,
   Hub,
@@ -21,8 +27,16 @@ import type {
   GqlSpoke,
   HubSpokeConfigForPair,
 } from './graphql/types';
-import type { RpcReads } from './rpc/reads';
-import { deriveHubId, deriveSpokeSlug, hubEditorialFor, spokeTypeFor } from './editorial';
+import type { ChainInfo } from './chains';
+import { reserveKey, spokeKey, ZERO_ADDRESS, type RpcReads } from './rpc/reads';
+import {
+  buildAssetMeta,
+  deriveHubId,
+  deriveSpokeSlug,
+  hubEditorialFor,
+  spokeTypeFor,
+  type TokenSeen,
+} from './editorial';
 
 const num = (s: string | null | undefined): number => {
   if (s == null) return 0;
@@ -30,10 +44,7 @@ const num = (s: string | null | undefined): number => {
   return Number.isFinite(n) ? n : 0;
 };
 const pct = (s: string | null | undefined): number => num(s) / 100; // .normalized is already %
-
-function ZERO_ADDR(): Address {
-  return '0x0000000000000000000000000000000000000000' as Address;
-}
+const lc = (a: string) => a.toLowerCase();
 
 function buildIrm(settings: GqlHubAsset['settings']): IRM | null {
   // V4 wraps assets without an IRM (credit lines, etc.). Treat zero-optimal as
@@ -69,7 +80,15 @@ function sampleIrmCurve(irm: IRM | null, n = 40): CurvePoint[] {
   return out;
 }
 
+export interface ChainLoadStatus {
+  chainId: number;
+  status: 'ok' | 'error';
+  error?: string;
+}
+
 export interface RawData {
+  chains: ChainInfo[];
+  chainStatus: ChainLoadStatus[];
   hubs: GqlHub[];
   hubAssetsByHubId: Record<string, GqlHubAsset[]>;
   spokes: GqlSpoke[];
@@ -79,32 +98,33 @@ export interface RawData {
 }
 
 export function transform(raw: RawData): AaveParams {
-  // Build a stable address→id map from the authoritative hub list — the only
-  // source carrying both address and on-chain name. Every other reference
-  // (spokes, reserves, credit lines) resolves a hub by address through this
-  // closure, mirroring how spokes resolve via slugByAddress. Unlike before, an
-  // unrecognized hub is no longer dropped: it gets a derived id here and a
-  // neutral default profile from hubEditorialFor below.
-  const hubIdByAddr = new Map<string, HubId>();
-  const idOwner = new Map<string, string>(); // derived id → address that claimed it
+  const chainById = new Map(raw.chains.map((c) => [c.chainId, c]));
+  const chainOrder = new Map(raw.chains.map((c, i) => [c.chainId, i]));
+  const hubKey = (chainId: number, addr: string) => `${chainId}|${lc(addr)}`;
+
+  // ---------- 0. Hub ids ----------
+  // `<chain slug>-<hub name>`; a same-name collision on one chain gets an
+  // address suffix. Every later reference resolves a hub by (chain, address).
+  const hubIdByKey = new Map<string, HubId>();
+  const takenIds = new Set<string>();
   for (const h of raw.hubs) {
-    let id = deriveHubId(h.address, h.name);
-    const owner = idOwner.get(id);
-    if (owner && owner !== h.address.toLowerCase()) {
-      id = `${id}-${h.address.slice(2, 6).toLowerCase()}`; // disambiguate slug collision
-    }
-    idOwner.set(id, h.address.toLowerCase());
-    hubIdByAddr.set(h.address.toLowerCase(), id);
+    const chain = chainById.get(h.chain.chainId);
+    const slug = chain?.slug ?? String(h.chain.chainId);
+    let id = deriveHubId(slug, h.address, h.name);
+    if (takenIds.has(id)) id = `${id}-${h.address.slice(2, 6).toLowerCase()}`;
+    takenIds.add(id);
+    hubIdByKey.set(hubKey(h.chain.chainId, h.address), id);
   }
-  const hubIdFromAddress = (addr: string): HubId | null =>
-    hubIdByAddr.get(addr.toLowerCase()) ?? null;
+  const hubIdOf = (chainId: number, addr: string): HubId | null =>
+    hubIdByKey.get(hubKey(chainId, addr)) ?? null;
 
   // ---------- 1. Hubs (without assets yet) ----------
   const hubsById = new Map<HubId, Hub>();
   for (const h of raw.hubs) {
-    const id = hubIdFromAddress(h.address);
-    if (!id) continue; // type-narrowing only; the pre-pass guarantees a hit
-    const ed = hubEditorialFor(id, h.name);
+    const id = hubIdOf(h.chain.chainId, h.address)!;
+    const chain = chainById.get(h.chain.chainId);
+    const seed = chain?.hubs?.find((s) => lc(s.address) === lc(h.address));
+    const ed = hubEditorialFor(h.name, seed);
     hubsById.set(id, {
       id,
       label: ed.label,
@@ -114,8 +134,10 @@ export function transform(raw: RawData): AaveParams {
       gqlId: h.id,
       chain: {
         chainId: h.chain.chainId,
-        name: h.chain.name ?? 'Ethereum',
-        explorer: h.chain.explorerUrl ?? 'https://etherscan.io',
+        name: chain?.label ?? h.chain.name ?? String(h.chain.chainId),
+        explorer: chain?.explorer ?? h.chain.explorerUrl ?? '',
+        slug: chain?.slug ?? String(h.chain.chainId),
+        icon: chain?.icon ?? '',
       },
       summary: {
         totalSupplied: num(h.summary.totalSupplied.current.value),
@@ -132,15 +154,18 @@ export function transform(raw: RawData): AaveParams {
   }
 
   // ---------- 2. Per-hub assets ----------
-  // Need cap aggregates from hubSpokeConfigs per (hub, asset symbol).
-  // Each pair entry brings the hubAddress + list of per-asset cap entries.
+  // Display symbols: unique per hub. A hub can list two different tokens that
+  // share a ticker (seen on OP); the later ones get a short address suffix.
+  const tokens: TokenSeen[] = [];
+  const aliases: Array<{ symbol: string; base: string; credit?: boolean }> = [];
+  const displaySymbol = new Map<string, string>(); // `${hubKey}|${underlying}` → symbol
+
   const capAggByHubAsset = new Map<string, { addCap: number; drawCap: number }>();
   for (const pair of raw.hubSpokeConfigsByPair) {
-    const hid = hubIdFromAddress(pair.hubAddress);
+    const hid = hubIdOf(pair.chainId, pair.hubAddress);
     if (!hid) continue;
     for (const c of pair.entries) {
-      const sym = c.asset.underlying.info.symbol;
-      const key = `${hid}|${sym}`;
+      const key = `${hid}|${c.asset.onchainAssetId}`;
       const cur = capAggByHubAsset.get(key) ?? { addCap: 0, drawCap: 0 };
       cur.addCap += num(c.supplyCap.exchange.value);
       cur.drawCap += num(c.borrowCap.exchange.value);
@@ -149,12 +174,26 @@ export function transform(raw: RawData): AaveParams {
   }
 
   for (const [hubId, hub] of hubsById) {
-    const gqlId = hub.gqlId;
-    const list = raw.hubAssetsByHubId[gqlId] ?? [];
-    const assets: HubAsset[] = list.map((a) => {
-      const sym = a.underlying.info.symbol;
-      const irm = buildIrm(a.settings);
-      const capAgg = capAggByHubAsset.get(`${hubId}|${sym}`) ?? { addCap: 0, drawCap: 0 };
+    const list = raw.hubAssetsByHubId[hub.gqlId] ?? [];
+    const used = new Set<string>();
+    hub.assets = list.map((a) => {
+      const rawSym = a.underlying.info.symbol;
+      let sym = rawSym;
+      if (used.has(sym)) {
+        sym = `${rawSym}·${a.underlying.address.slice(2, 6).toLowerCase()}`;
+        aliases.push({ symbol: sym, base: rawSym });
+      }
+      used.add(sym);
+      displaySymbol.set(`${hubKey(hub.chain.chainId, hub.address)}|${lc(a.underlying.address)}`, sym);
+      tokens.push({
+        symbol: rawSym,
+        chainId: hub.chain.chainId,
+        address: a.underlying.address,
+        name: a.underlying.info.name,
+        icon: a.underlying.info.icon,
+        categories: a.underlying.info.categories,
+      });
+      const capAgg = capAggByHubAsset.get(`${hubId}|${a.onchainAssetId}`) ?? { addCap: 0, drawCap: 0 };
       return {
         symbol: sym,
         underlying: a.underlying.address,
@@ -163,7 +202,7 @@ export function transform(raw: RawData): AaveParams {
         liquidityFee: pct(a.settings.liquidityFee.normalized),
         irStrategy: a.settings.irStrategy,
         reinvestmentController: a.settings.reinvestmentController,
-        irm,
+        irm: buildIrm(a.settings),
         summary: {
           supplied: num(a.summary.supplied.exchange.value),
           borrowed: num(a.summary.borrowed.exchange.value),
@@ -177,75 +216,66 @@ export function transform(raw: RawData): AaveParams {
           reservesCount: a.summary.reservesCount,
           activeReservesCount: a.summary.activeReservesCount,
         },
-      };
+      } satisfies HubAsset;
     });
-    hub.assets = assets;
-    hub.summary.assetCount = assets.length;
+    hub.summary.assetCount = hub.assets.length;
   }
 
   // ---------- 3. Spokes ----------
-  // Parent hub for each spoke is DATA-DERIVED, not editorial: count which hub
-  // holds the spoke's collateral reserves. Credit lines provide borrowable
-  // assets, not collateral, so the hub with the most `collateral: true`
-  // reserves is structurally the parent. Falls back to connectedHubs[0] if a
-  // spoke has zero collateral reserves yet (newly listed).
-  const spokeBySlug = new Map<string, Spoke>();
-  const slugByGqlSpokeId = new Map<string, string>();
-  const slugByAddress = new Map<string, string>();
+  // Parent hub for each spoke is DATA-DERIVED: the hub holding most of the
+  // spoke's collateral reserves (credit lines bring borrowables, not
+  // collateral). Ties → first connected hub; zero collateral → connected[0].
+  const spokeById = new Map<string, Spoke>();
+  const gqlIdBySpoke = new Map<string, string>();
+  const spokeIdByKey = new Map<string, string>(); // `${chainId}|${address}` → id
   for (const s of raw.spokes) {
+    const chainId = s.chain.chainId;
     const connected = s.connectedHubs
-      .map((c) => hubIdFromAddress(c.hub.address))
+      .map((c) => hubIdOf(chainId, c.hub.address))
       .filter((id): id is HubId => id !== null);
     if (connected.length === 0) continue;
 
-    // Tally collateral reserves per hub
     const reservesList = raw.reservesBySpokeId[s.id] ?? [];
     const collateralByHub = new Map<HubId, number>();
     for (const r of reservesList) {
       if (!r.settings.collateral) continue;
-      const h = hubIdFromAddress(r.asset.hub.address);
-      if (!h) continue;
-      collateralByHub.set(h, (collateralByHub.get(h) ?? 0) + 1);
+      const h = hubIdOf(chainId, r.asset.hub.address);
+      if (h) collateralByHub.set(h, (collateralByHub.get(h) ?? 0) + 1);
     }
-
-    // Parent = hub with the most collateral reserves; tiebreaker = first in
-    // connectedHubs; zero-collateral fallback = connectedHubs[0]. This makes
-    // a brand-new multi-hub spoke get a correct credit-line classification
-    // the moment it's listed, with no editorial update needed.
-    let parentHub: HubId | undefined;
-    let maxCollateralCount = 0;
+    let parentHub = connected[0];
+    let maxCount = 0;
     for (const h of connected) {
       const count = collateralByHub.get(h) ?? 0;
-      if (count > maxCollateralCount) {
-        maxCollateralCount = count;
+      if (count > maxCount) {
+        maxCount = count;
         parentHub = h;
       }
     }
-    if (!parentHub) parentHub = connected[0];
 
-    const slug = deriveSpokeSlug(s.address, parentHub, s.name);
-    slugByGqlSpokeId.set(s.id, slug);
-    slugByAddress.set(s.address, slug);
+    let id = deriveSpokeSlug(parentHub, s.name, s.address);
+    if (spokeById.has(id)) id = `${id}-${s.address.slice(2, 6).toLowerCase()}`;
+    gqlIdBySpoke.set(id, s.id);
+    spokeIdByKey.set(`${chainId}|${lc(s.address)}`, id);
 
-    const finalHub = parentHub;
-
-    const lc = s.liquidationConfig;
+    const lcfg = s.liquidationConfig;
     // AaveKit pre-decodes targetHealthFactor / healthFactorForMaxBonus to a
     // decimal string (e.g. "1.174000000000000000"). No /1e18 needed here.
-    const liq = lc
+    const liq = lcfg
       ? {
-          targetHF: num(lc.targetHealthFactor),
-          hfForMaxBonus: num(lc.healthFactorForMaxBonus),
-          liqBonusFactor: pct(lc.liquidationBonusFactor.normalized),
+          targetHF: num(lcfg.targetHealthFactor),
+          hfForMaxBonus: num(lcfg.healthFactorForMaxBonus),
+          liqBonusFactor: pct(lcfg.liquidationBonusFactor.normalized),
         }
       : { targetHF: 1.05, hfForMaxBonus: 0.93, liqBonusFactor: 0.3 };
 
-    spokeBySlug.set(slug, {
-      id: slug,
+    const imm = raw.rpc.spokeImmutables.get(spokeKey(chainId, s.address));
+    spokeById.set(id, {
+      id,
+      chainId,
       name: s.name,
-      type: spokeTypeFor(slug, s.name),
+      type: spokeTypeFor(s.name),
       address: s.address,
-      hubId: finalHub,
+      hubId: parentHub,
       connectedHubs: connected,
       summary: {
         totalSupplied: num(s.summary.totalSupplied.value),
@@ -253,10 +283,8 @@ export function transform(raw: RawData): AaveParams {
         utilizationRate: 0,
         uniqueAssets: s.summary.uniqueAssets,
         connectedHubs: s.summary.connectedHubs,
-        // Phase 2.1: populated from RPC reads below.
-        oracle: raw.rpc.spokeImmutables.get(s.address)?.oracle ?? ZERO_ADDR(),
-        maxUserReservesLimit:
-          raw.rpc.spokeImmutables.get(s.address)?.maxUserReservesLimit ?? 0,
+        oracle: imm?.oracle ?? ZERO_ADDRESS,
+        maxUserReservesLimit: imm?.maxUserReservesLimit ?? 0,
       },
       liquidationConfig: liq,
       reserves: [],
@@ -264,27 +292,32 @@ export function transform(raw: RawData): AaveParams {
   }
 
   // ---------- 4. Reserves per spoke ----------
-  for (const [, spoke] of spokeBySlug) {
-    // The GraphQL spokeId we used to query is the original (base64) id.
-    // We stored slug → gqlId via slugByGqlSpokeId, so reverse-lookup.
-    const gqlId = [...slugByGqlSpokeId.entries()].find(([, slug]) => slug === spoke.id)?.[0];
-    const list = gqlId ? raw.reservesBySpokeId[gqlId] ?? [] : [];
-
-    const reserves: Reserve[] = list.map((r) => {
-      const hubId = hubIdFromAddress(r.asset.hub.address);
+  for (const spoke of spokeById.values()) {
+    const list = raw.reservesBySpokeId[gqlIdBySpoke.get(spoke.id)!] ?? [];
+    spoke.reserves = list.map((r): Reserve => {
+      const hubId = hubIdOf(spoke.chainId, r.asset.hub.address);
       const rawSym = r.asset.underlying.info.symbol;
-      // Multi-hub spokes (e.g. Bluechip on Prime+Core, Ethena Ecosystem on
-      // Plus+Core) can hold the same underlying asset twice — once from the
-      // parent hub, once as a credit line. Prefix credit-line reserves with
-      // 'c' so React keys stay unique AND the UI signals "this is a credit
-      // route" (matches the prototype's cUSDC/cUSDT convention).
+      tokens.push({
+        symbol: rawSym,
+        chainId: spoke.chainId,
+        address: r.asset.underlying.address,
+        name: r.asset.underlying.info.name,
+        icon: r.asset.underlying.info.icon,
+        categories: r.asset.underlying.info.categories,
+      });
+      const baseSym =
+        displaySymbol.get(
+          `${hubKey(spoke.chainId, r.asset.hub.address)}|${lc(r.asset.underlying.address)}`,
+        ) ?? rawSym;
+      // Multi-hub spokes (Bluechip on Prime+Core, Ethena Ecosystem on
+      // Plus+Core) can hold the same underlying twice — once from the parent
+      // hub, once as a credit line. Prefix credit-line reserves with 'c' so
+      // React keys stay unique AND the UI signals "this is a credit route".
       const isCreditLine = hubId != null && hubId !== spoke.hubId;
-      const sym = isCreditLine ? `c${rawSym}` : rawSym;
-      // ReserveStatus is an object { frozen, paused, active } — not an enum.
-      const paused = !!r.status?.paused;
-      const frozen = !!r.status?.frozen;
+      const sym = isCreditLine ? `c${baseSym}` : baseSym;
+      if (isCreditLine) aliases.push({ symbol: sym, base: rawSym, credit: true });
       const supplied = num(r.summary.supplied.exchange.value);
-      const borrowed = num(r.summary.borrowed.exchange.value);
+      const suppliedTokens = num(r.summary.supplied.amount.value);
       return {
         symbol: sym,
         underlying: r.asset.underlying.address,
@@ -293,8 +326,8 @@ export function transform(raw: RawData): AaveParams {
         assetId: Number(r.onChainId),
         decimals: r.asset.underlying.info.decimals,
         collateralRisk: pct(r.settings.collateralRisk.normalized),
-        paused,
-        frozen,
+        paused: !!r.status?.paused,
+        frozen: !!r.status?.frozen,
         borrowable: r.settings.borrowable,
         collateral: r.settings.collateral,
         receiveSharesEnabled: r.settings.receiveSharesEnabled,
@@ -303,39 +336,44 @@ export function transform(raw: RawData): AaveParams {
         maxLiquidationBonus: pct(r.settings.maxLiquidationBonus.normalized),
         liquidationFee: pct(r.settings.liquidationFee.normalized),
         suppliedAmount: supplied,
-        borrowedAmount: borrowed,
+        borrowedAmount: num(r.summary.borrowed.exchange.value),
         supplyCap: num(r.settings.supplyCap.exchange.value),
         borrowCap: num(r.settings.borrowCap.exchange.value),
         supplyApy: pct(r.summary.supplyApy.normalized),
         borrowApy: pct(r.summary.borrowApy.normalized),
         oracle: {
-          // Phase 2.1: per-reserve price feed from AaveOracle.getReserveSource
           source:
-            raw.rpc.reserveSources.get(`${spoke.address}|${Number(r.onChainId)}`) ??
-            ZERO_ADDR(),
+            raw.rpc.reserveSources.get(reserveKey(spoke.chainId, spoke.address, Number(r.onChainId))) ??
+            ZERO_ADDRESS,
           description: `${sym} / USD`,
-          price:
-            supplied > 0 && Number(r.summary.supplied.amount.value) > 0
-              ? supplied / Number(r.summary.supplied.amount.value)
-              : 1,
+          price: supplied > 0 && suppliedTokens > 0 ? supplied / suppliedTokens : 1,
           decimals: 8,
         },
       };
     });
-
-    spoke.reserves = reserves;
     spoke.summary.utilizationRate =
-      spoke.summary.totalSupplied > 0
-        ? spoke.summary.totalBorrowed / spoke.summary.totalSupplied
-        : 0;
+      spoke.summary.totalSupplied > 0 ? spoke.summary.totalBorrowed / spoke.summary.totalSupplied : 0;
   }
 
-  const spokes = [...spokeBySlug.values()];
+  // Order: registry chain order, then TVL within a chain.
+  const byChainThenTvl = <T extends { chainId: number; tvl: number }>(a: T, b: T) =>
+    (chainOrder.get(a.chainId) ?? 99) - (chainOrder.get(b.chainId) ?? 99) || b.tvl - a.tvl;
+  const hubs = [...hubsById.values()].sort((a, b) =>
+    byChainThenTvl(
+      { chainId: a.chain.chainId, tvl: a.summary.totalSupplied },
+      { chainId: b.chain.chainId, tvl: b.summary.totalSupplied },
+    ),
+  );
+  const spokes = [...spokeById.values()].sort((a, b) =>
+    byChainThenTvl(
+      { chainId: a.chainId, tvl: a.summary.totalSupplied },
+      { chainId: b.chainId, tvl: b.summary.totalSupplied },
+    ),
+  );
 
   // ---------- 5. Hub spoke ref list (for the matrix tab) ----------
-  for (const [, hub] of hubsById) {
+  for (const hub of hubs) {
     const hubSpokes: HubSpokeRef[] = spokes
-      .filter((sp) => sp.hubId === hub.id || sp.connectedHubs.includes(hub.id))
       .filter((sp) => sp.hubId === hub.id)
       .map((sp) => ({
         id: sp.id,
@@ -349,29 +387,28 @@ export function transform(raw: RawData): AaveParams {
   }
 
   // ---------- 6. Credit lines (derived from hubSpokeConfigsByPair) ----------
-  // A "credit line" entry is a (hub, spoke, asset) where the spoke's editorial
-  // parent hub differs from the hub providing the cap. Group these to form
-  // CreditLine objects per (sourceHub, destinationSpoke).
+  // A credit line is a (hub, spoke, asset) cap where the spoke's parent hub
+  // differs from the hub providing the cap. Always intra-chain.
   const linesByKey = new Map<string, CreditLine>();
   for (const pair of raw.hubSpokeConfigsByPair) {
-    const sourceHub = hubIdFromAddress(pair.hubAddress);
-    const spokeSlug = slugByAddress.get(pair.spokeAddress);
-    if (!sourceHub || !spokeSlug) continue;
-    const spoke = spokeBySlug.get(spokeSlug);
-    if (!spoke) continue;
+    const sourceHub = hubIdOf(pair.chainId, pair.hubAddress);
+    const spokeId = spokeIdByKey.get(`${pair.chainId}|${lc(pair.spokeAddress)}`);
+    if (!sourceHub || !spokeId) continue;
+    const spoke = spokeById.get(spokeId)!;
     if (spoke.hubId === sourceHub) continue; // same-hub draws aren't credit lines
     for (const c of pair.entries) {
       const addCap = num(c.supplyCap.exchange.value);
       const drawCap = num(c.borrowCap.exchange.value);
       if (addCap === 0 && drawCap === 0) continue;
       const sym = c.asset.underlying.info.symbol;
-      const key = `${sourceHub}|${spoke.hubId}|${spokeSlug}`;
+      const key = `${sourceHub}|${spoke.hubId}|${spokeId}`;
       let line = linesByKey.get(key);
       if (!line) {
         line = {
+          chainId: pair.chainId,
           from: sourceHub,
           to: spoke.hubId,
-          toSpoke: spokeSlug,
+          toSpoke: spokeId,
           assets: [],
           index: linesByKey.size,
           riskPremiumThreshold: pct(c.riskPremiumThreshold.normalized),
@@ -380,14 +417,12 @@ export function transform(raw: RawData): AaveParams {
         linesByKey.set(key, line);
       }
       if (!line.assets.includes(sym)) line.assets.push(sym);
-      // Find the matching credit-line reserve on the destination spoke. The
-      // reserve carries the live `supplied`/`borrowed` (we c-prefix credit
-      // reserves in step 4, so the lookup is `c${sym}` AND hubAddress matches
-      // the source). This was previously hardcoded to 0 — that was wrong.
+      // The matching credit-line reserve on the destination spoke carries the
+      // live supplied/borrowed (c-prefixed in step 4, hub address = source).
       const matchingReserve = spoke.reserves.find(
         (r) =>
           (r.symbol === `c${sym}` || r.symbol === sym) &&
-          r.hubAddress.toLowerCase() === pair.hubAddress.toLowerCase(),
+          lc(r.hubAddress) === lc(pair.hubAddress),
       );
       line.capByAsset[sym] = {
         addCap,
@@ -397,15 +432,54 @@ export function transform(raw: RawData): AaveParams {
       };
     }
   }
-
-  // ---------- 7. Final API ----------
-  const hubs = [...hubsById.values()];
   const creditLines = [...linesByKey.values()];
 
-  return {
+  // ---------- 7. Per-chain summaries ----------
+  const statusById = new Map(raw.chainStatus.map((s) => [s.chainId, s]));
+  const chains: ChainSummary[] = raw.chains.map((c) => {
+    const ch = hubs.filter((h) => h.chain.chainId === c.chainId);
+    const cs = spokes.filter((s) => s.chainId === c.chainId);
+    const st = statusById.get(c.chainId);
+    return {
+      chainId: c.chainId,
+      slug: c.slug,
+      label: c.label,
+      icon: c.icon,
+      explorer: c.explorer,
+      source: c.source,
+      operator: c.operator,
+      status: st?.status === 'error' ? 'error' : ch.length === 0 ? 'empty' : 'ok',
+      error: st?.error,
+      totals: {
+        supplied: ch.reduce((t, h) => t + h.summary.totalSupplied, 0),
+        borrowed: ch.reduce((t, h) => t + h.summary.totalBorrowed, 0),
+        hubs: ch.length,
+        spokes: cs.length,
+        reserves: cs.reduce((t, s) => t + s.reserves.length, 0),
+      },
+    };
+  });
+
+  return buildApi({
+    chains,
     hubs,
     spokes,
     creditLines,
+    assetMeta: buildAssetMeta(tokens, aliases),
+  });
+}
+
+/** Wrap the plain collections with the lookup helpers the UI calls. */
+export function buildApi(d: {
+  chains: ChainSummary[];
+  hubs: Hub[];
+  spokes: Spoke[];
+  creditLines: CreditLine[];
+  assetMeta: Record<string, AssetMetadata>;
+}): AaveParams {
+  const { hubs, spokes, creditLines } = d;
+  return {
+    ...d,
     helpers: { sampleIrmCurve, evalBorrowRate },
     getHub: (id) => hubs.find((h) => h.id === id),
     getSpoke: (id) => spokes.find((s) => s.id === id),
@@ -413,4 +487,17 @@ export function transform(raw: RawData): AaveParams {
       spokes.find((s) => s.id === spokeId)?.reserves.find((r) => r.symbol === sym),
     creditLinesForSpoke: (spokeId) => creditLines.filter((c) => c.toSpoke === spokeId),
   };
+}
+
+/** Narrow a full dataset to one chain. `chains` stays complete so the
+ *  switcher can still list every network. */
+export function scopeToChain(data: AaveParams, chainId: number | 'all'): AaveParams {
+  if (chainId === 'all') return data;
+  return buildApi({
+    chains: data.chains,
+    hubs: data.hubs.filter((h) => h.chain.chainId === chainId),
+    spokes: data.spokes.filter((s) => s.chainId === chainId),
+    creditLines: data.creditLines.filter((c) => c.chainId === chainId),
+    assetMeta: data.assetMeta,
+  });
 }
